@@ -1,0 +1,20 @@
+[package]
+name = "solar-system-opt"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0"
+description = "LP optimization for solar system size based on consumption data"
+
+[dependencies]
+good_lp = { version = "1.8", features = ["clarabel"], default-features = false }
+calamine = "0.24"
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+anyhow = "1.0"
+indexmap = "2.0"
+plotters = "0.3"
+plotters-backend = "0.3"
+ems-model = { version = "0.1.0", path = "../ems-model" }
+
+[dev-dependencies]
+tempfile = "3.8"

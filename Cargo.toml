@@ -1,5 +1,3 @@
 [workspace]
-members = ["ems-model"]
+members = ["ems-model", "solar-system-opt"]
 resolver = "3"
-
-[workspace.dependencies]
