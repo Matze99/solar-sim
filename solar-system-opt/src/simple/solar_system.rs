@@ -776,7 +776,7 @@ mod tests {
         assert_eq!(config.annuity, 0.1);
         assert_eq!(config.fc_grid, 0.30);
         assert_eq!(config.feed_in_tariff, 0.079);
-        assert_eq!(config.bat_value, 2000.0);
+        assert_eq!(config.bat_value, 20000.0);
         assert_eq!(config.pv_capacity_min, 0.0);
         assert_eq!(config.pv_capacity_max, 2.0);
         assert_eq!(config.pv_capacity_step, 0.5);
