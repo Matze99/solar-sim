@@ -18,6 +18,11 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libfontconfig1-dev pkg-config
+        
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
       with:
@@ -61,6 +66,11 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libfontconfig1-dev pkg-config
+        
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
       
@@ -86,6 +96,11 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libfontconfig1-dev pkg-config
+        
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
       with:
