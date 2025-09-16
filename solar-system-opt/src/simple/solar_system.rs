@@ -1,12 +1,12 @@
 use good_lp::{
-    clarabel, constraint, solvers::clarabel::ClarabelSolution, variable, variables, Expression,
-    Solution, SolverModel,
+    Expression, Solution, SolverModel, clarabel, constraint, solvers::clarabel::ClarabelSolution,
+    variable, variables,
 };
 use std::collections::HashMap;
 
 use crate::simple::plot::plot_result1;
 use crate::simple::solar_system_utils::{
-    load_demand_from_csv, load_solar_radiance_from_csv, OptimizationConfig, OptimizationResults,
+    OptimizationConfig, OptimizationResults, load_demand_from_csv, load_solar_radiance_from_csv,
 };
 
 pub fn simulation() {

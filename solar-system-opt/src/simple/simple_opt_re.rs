@@ -3,10 +3,10 @@ use good_lp::variables;
 use crate::general::electricity_demand::create_scaled_load_curve_from_csv;
 use crate::simple::plot::{plot_hourly_averages, plot_hourly_averages_with_title};
 use crate::simple::solar_system_utils::{
+    HeatingType, InsulationLevel, OptimizationConfig, SimpleOptimizationResults,
     calculate_heat_demand, calculate_heat_demand_with_insulation,
     calculate_heat_pump_electricity_consumption, load_demand_from_csv,
-    load_solar_radiance_from_csv, HeatingType, InsulationLevel, OptimizationConfig,
-    SimpleOptimizationResults,
+    load_solar_radiance_from_csv,
 };
 use ems_model::building::insulation::{BuildingTypeEnum, YearCategoryESEnum};
 
@@ -39,7 +39,7 @@ pub fn run_simple_opt(
     solar_irradiance: Vec<f64>,
     electricity_demand: Vec<f64>,
 ) -> Result<SimpleOptimizationResults, Box<dyn std::error::Error>> {
-    use good_lp::{constraint, variable, Expression, Solution, SolverModel};
+    use good_lp::{Expression, Solution, SolverModel, constraint, variable};
 
     // Use monthly demand to generate scaled load curve if available, otherwise use provided electricity_demand
     let scaled_electricity_demand: Vec<f64> =
@@ -76,7 +76,7 @@ pub fn run_simple_opt(
     let mut e_grid: Vec<good_lp::Variable> = Vec::with_capacity(NUM_HOURS);
     // energy overproduction
     let mut e_o: Vec<good_lp::Variable> = Vec::with_capacity(NUM_HOURS); // overproduction
-                                                                         // battery storage variables
+    // battery storage variables
     let mut est_battery: Vec<good_lp::Variable> = Vec::with_capacity(NUM_HOURS);
     let mut est_in_battery: Vec<good_lp::Variable> = Vec::with_capacity(NUM_HOURS);
     let mut est_out_battery: Vec<good_lp::Variable> = Vec::with_capacity(NUM_HOURS);
@@ -102,7 +102,10 @@ pub fn run_simple_opt(
                     .collect() // TODO: remove this. This is a hack to make it work for now
             }
             Err(e) => {
-                println!("Warning: Failed to load insulation-based heat demand: {}. Falling back to temperature-based calculation.", e);
+                println!(
+                    "Warning: Failed to load insulation-based heat demand: {}. Falling back to temperature-based calculation.",
+                    e
+                );
                 calculate_heat_demand(
                     config.house_square_meters,
                     &config.insulation_level,
@@ -122,7 +125,10 @@ pub fn run_simple_opt(
                 electricity
             }
             Err(e) => {
-                println!("Warning: Failed to calculate COP-based electricity consumption: {}. Using default COP of 3.0.", e);
+                println!(
+                    "Warning: Failed to calculate COP-based electricity consumption: {}. Using default COP of 3.0.",
+                    e
+                );
                 heat_demand.iter().map(|&heat| heat / 3.0).collect()
             }
         }
