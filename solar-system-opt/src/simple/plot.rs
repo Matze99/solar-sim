@@ -396,62 +396,6 @@ pub fn print_optimization_summary(results: &OptimizationResults) {
     println!("=====================================\n");
 }
 
-// Function to generate demo plots with sample data
-pub fn generate_demo_plots() -> Result<(), Box<dyn std::error::Error>> {
-    use crate::simple::solar_system::run_optimization_loop;
-
-    // Run the optimization loop like the Python script
-    let config = OptimizationConfig::default();
-    run_optimization_loop(&config);
-
-    // Also generate some demo plots for illustration
-
-    // Generate sample data for demonstration
-    let sample_data: Vec<f64> = (0..100)
-        .map(|i: i32| (i as f64 * 0.1).sin() * 50.0 + 50.0)
-        .collect();
-
-    // Example 1: Simple line plot
-    plot_data1(
-        &sample_data,
-        "Sample Energy Data",
-        "Time (hours)",
-        "Energy (kWh)",
-        "energy_plot.png",
-    )?;
-
-    // Example 2: Demand vs Supply comparison
-    let dem_elec: Vec<f64> = (0..24)
-        .map(|i| 30.0 + (i as f64 * 0.26).sin() * 10.0)
-        .collect();
-    let dem_charge: Vec<f64> = (0..24)
-        .map(|i| 20.0 + (i as f64 * 0.5).cos() * 8.0)
-        .collect();
-    let sup_grid: Vec<f64> = (0..24)
-        .map(|i| 25.0 + (i as f64 * 0.3).sin() * 12.0)
-        .collect();
-    let sup_pv: Vec<f64> = (0..24)
-        .map(|i| {
-            if i > 6 && i < 18 {
-                40.0 + (i as f64 * 0.4).sin() * 15.0
-            } else {
-                0.0
-            }
-        })
-        .collect();
-
-    plot_data2(
-        &dem_elec,
-        &dem_charge,
-        &sup_grid,
-        &sup_pv,
-        "results/demand_supply_comparison.png",
-    )?;
-
-    println!("Demo plots generated successfully!");
-    Ok(())
-}
-
 /// Plot hourly averages for electricity demand, PV production, and grid consumption
 /// Can handle both full year data (8760 hours) for averaging, or single day data (24 hours)
 pub fn plot_hourly_averages(
