@@ -359,7 +359,7 @@ pub struct OptimizationResults {
 }
 
 /// Struct to hold simple optimization results for printing and plotting
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SimpleOptimizationResults {
     // Capacities
     pub pv_capacity_kw: f64,
@@ -407,9 +407,10 @@ pub enum InsulationLevel {
     Good,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum HeatingType {
     Floor,
+    #[default]
     Radiator,
 }
 
