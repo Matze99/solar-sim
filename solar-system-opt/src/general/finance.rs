@@ -39,6 +39,7 @@ pub fn calculate_optimized_roi(
         .map(|index| {
             let electricity_cost = simulation_results.config.fc_grid
                 * simulation_results.config.electricity_usage
+                / 1000.0
                 * (1.0 + simulation_results.config.electricity_price_increase).powf(index as f64);
             electricity_cost
         })
@@ -74,7 +75,7 @@ pub fn calculate_optimized_roi(
     };
 
     // Use binary search to find the root within a reasonable range
-    let mut low = -0.5; // -50% ROI
+    let mut low = 0.0; // 0% ROI
     let mut high = 2.0; // 200% ROI
     let tolerance = 1e-6;
     let max_iterations = 100;
@@ -182,12 +183,20 @@ mod tests {
     fn test_calculate_financial_rentability() {
         let mut simulation_results = SimpleOptimizationResults::default();
         let num_years = 25;
+        simulation_results.config.inv_pv = 900.0;
+        simulation_results.config.electricity_price_increase = 0.01;
+        simulation_results.config.fc_grid = 0.16;
         simulation_results.config.electricity_usage = 9000000.0;
         simulation_results.battery_capacity_kwh = 0.0;
-        simulation_results.grid_capacity_kw = simulation_results.config.electricity_usage * 0.57;
-        simulation_results.pv_capacity_kw = simulation_results.config.electricity_usage * 0.43;
+        simulation_results.pv_capacity_kw = 2.45;
+        simulation_results.annual_grid_energy_kwh =
+            simulation_results.config.electricity_usage * 0.57 / 1000.0;
         let optimized_roi = calculate_optimized_roi(simulation_results, num_years).unwrap();
         println!("Optimized ROI: {:?}", optimized_roi);
-        assert!(optimized_roi.roi == 0.23);
+        assert!((optimized_roi.roi - 0.346).abs() < 1e-3);
+        println!("Net present value: {:?}", optimized_roi.net_present_value);
+        assert!((optimized_roi.net_present_value - 271.0).abs() < 0.5);
+        println!("Payback period: {:?}", optimized_roi.payback_period);
+        assert!((optimized_roi.payback_period.unwrap() - 3.5).abs() < 0.02);
     }
 }
