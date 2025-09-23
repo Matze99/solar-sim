@@ -20,6 +20,7 @@ pub struct OptimizedROIResult {
 pub fn calculate_optimized_roi(
     simulation_results: SimpleOptimizationResults,
     num_years: usize,
+    other_yearly_cost: f64,
 ) -> Result<OptimizedROIResult, Box<dyn std::error::Error>> {
     // Calculate initial investment (same as in calculate_financial_rentability)
     let initial_investment = simulation_results.pv_capacity_kw * simulation_results.config.inv_pv
@@ -50,7 +51,7 @@ pub fn calculate_optimized_roi(
             let electricity_cost = simulation_results.config.fc_grid
                 * simulation_results.annual_grid_energy_kwh
                 * (1.0 + simulation_results.config.electricity_price_increase).powf(index as f64);
-            electricity_cost
+            electricity_cost + other_yearly_cost
         })
         .collect::<Vec<f64>>();
 
@@ -75,7 +76,7 @@ pub fn calculate_optimized_roi(
     };
 
     // Use binary search to find the root within a reasonable range
-    let mut low = 0.0; // 0% ROI
+    let mut low = -0.3; // 0% ROI
     let mut high = 2.0; // 200% ROI
     let tolerance = 1e-6;
     let max_iterations = 100;
@@ -191,12 +192,33 @@ mod tests {
         simulation_results.pv_capacity_kw = 2.45;
         simulation_results.annual_grid_energy_kwh =
             simulation_results.config.electricity_usage * 0.57 / 1000.0;
-        let optimized_roi = calculate_optimized_roi(simulation_results, num_years).unwrap();
+        let optimized_roi = calculate_optimized_roi(simulation_results, num_years, 0.0).unwrap();
         println!("Optimized ROI: {:?}", optimized_roi);
         assert!((optimized_roi.roi - 0.346).abs() < 1e-3);
         println!("Net present value: {:?}", optimized_roi.net_present_value);
         assert!((optimized_roi.net_present_value - 271.0).abs() < 0.5);
         println!("Payback period: {:?}", optimized_roi.payback_period);
         assert!((optimized_roi.payback_period.unwrap() - 3.5).abs() < 0.02);
+    }
+
+    #[test]
+    fn test_calculate_financial_rentability_with_yearly() {
+        let mut simulation_results = SimpleOptimizationResults::default();
+        let num_years = 25;
+        simulation_results.config.inv_pv = 900.0;
+        simulation_results.config.electricity_price_increase = 0.0;
+        simulation_results.config.fc_grid = 0.16;
+        simulation_results.config.electricity_usage = 9000000.0;
+        simulation_results.battery_capacity_kwh = 0.0;
+        simulation_results.pv_capacity_kw = 2.45;
+        simulation_results.annual_grid_energy_kwh =
+            simulation_results.config.electricity_usage * 0.57 / 1000.0;
+        let optimized_roi = calculate_optimized_roi(simulation_results, num_years, 120.0).unwrap();
+        println!("Optimized ROI: {:?}", optimized_roi);
+        assert!((optimized_roi.roi - 0.224).abs() < 1e-3);
+        println!("Net present value: {:?}", optimized_roi.net_present_value);
+        assert!((optimized_roi.net_present_value - 496.03).abs() < 0.5);
+        println!("Payback period: {:?}", optimized_roi.payback_period);
+        assert!((optimized_roi.payback_period.unwrap() - 4.417).abs() < 0.02);
     }
 }
