@@ -213,7 +213,9 @@ mod tests {
         simulation_results.pv_capacity_kw = 2.45;
         simulation_results.annual_grid_energy_kwh =
             simulation_results.config.electricity_usage * 0.57 / 1000.0;
+        
         let optimized_roi = calculate_optimized_roi(simulation_results, num_years, 120.0).unwrap();
+
         println!("Optimized ROI: {:?}", optimized_roi);
         assert!((optimized_roi.roi - 0.224).abs() < 1e-3);
         println!("Net present value: {:?}", optimized_roi.net_present_value);
