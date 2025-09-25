@@ -1,4 +1,6 @@
+use ems_model::building::electricity::ElectricityRate;
 use good_lp::variables;
+use good_lp::{Expression, Solution, SolverModel, constraint, variable};
 
 use crate::general::electricity_demand::create_scaled_load_curve_from_csv;
 use crate::simple::plot::{plot_hourly_averages, plot_hourly_averages_with_title};
@@ -38,9 +40,8 @@ pub fn run_simple_opt(
     pv_cap_w_max: f64,
     solar_irradiance: Vec<f64>,
     electricity_demand: Vec<f64>,
+    electricity_rate: ElectricityRate,
 ) -> Result<SimpleOptimizationResults, Box<dyn std::error::Error>> {
-    use good_lp::{Expression, Solution, SolverModel, constraint, variable};
-
     // Use monthly demand to generate scaled load curve if available, otherwise use provided electricity_demand
     let scaled_electricity_demand: Vec<f64> =
         if let Some(ref monthly_demand) = config.monthly_demand {
@@ -56,7 +57,7 @@ pub fn run_simple_opt(
                 .map(|&demand| demand * (config.electricity_usage / 4173440.0))
                 .collect()
         };
-
+    let electricity_rate_hourly = electricity_rate.to_yearly_hourly_rates();
     // Pre-calculate battery constants
     let storage_retention_bat = 1.0 - config.storage_loss_bat;
     let eta_in_bat = config.eta_in_bat;
@@ -166,7 +167,7 @@ pub fn run_simple_opt(
 
     // Operating costs and revenues (time-dependent)
     for t in 0..NUM_HOURS {
-        objective += e_grid[t] / 1000.0 * config.fc_grid; // Cost of grid electricity
+        objective += e_grid[t] / 1000.0 * electricity_rate_hourly[t]; // Cost of grid electricity
         objective -= e_o[t] / 1000.0 * config.feed_in_tariff; // Revenue from feed-in
     }
 
@@ -410,7 +411,13 @@ pub fn run_simple_opt_with_output(
     electricity_demand: Vec<f64>,
     days_to_plot: Option<&[usize]>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let results = run_simple_opt(config, pv_cap_w_max, solar_irradiance, electricity_demand)?;
+    let results = run_simple_opt(
+        config.clone(),
+        pv_cap_w_max,
+        solar_irradiance,
+        electricity_demand,
+        ElectricityRate::fixed(config.fc_grid),
+    )?;
 
     // Print results
     println!("=== SIMPLE OPTIMIZATION RESULTS ===");
@@ -600,9 +607,12 @@ pub fn run_simple_opt_loop(
 ///
 /// # Example
 /// ```rust
+/// use solar_system_opt::simple::simple_opt_re::run_simple_opt_with_day_plots;
+/// use solar_system_opt::simple::solar_system_utils::OptimizationConfig;
+///
 /// let config = OptimizationConfig::default();
 /// let days = vec![0, 100, 200, 300]; // Plot first day of each season
-/// run_simple_opt_with_day_plots(config, &days)?;
+/// run_simple_opt_with_day_plots(config, &days).unwrap();
 /// ```
 pub fn run_simple_opt_with_day_plots(
     mut config: OptimizationConfig,
