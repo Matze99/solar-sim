@@ -549,7 +549,6 @@ pub fn calculate_heat_demand_with_insulation(
     let heat_demand_column = match building_type {
         BuildingTypeEnum::SingleFamily | BuildingTypeEnum::Terraced => "SFH",
         BuildingTypeEnum::MultiFamily | BuildingTypeEnum::Apartment => "MFH",
-        _ => return Err("Invalid building type".into()),
     };
 
     let hourly_profile = load_heat_demand_profile_from_csv(heat_demand_column)?;

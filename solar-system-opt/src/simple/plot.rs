@@ -1,7 +1,7 @@
 use plotters::prelude::*;
 use std::collections::HashMap;
 
-use crate::simple::solar_system_utils::{OptimizationConfig, OptimizationResults};
+use crate::simple::solar_system_utils::OptimizationResults;
 
 // Equivalent to plot_data1 function
 pub fn plot_data1(
@@ -314,8 +314,7 @@ pub fn generate_optimization_plots(
 
     // Plot 2: Compare demand vs supply for first 24 hours
     let daily_hours = 24.min(results.pv_energy.len());
-    let electricity_demand = vec![2.0; daily_hours]; // Same as in simulation
-    let hot_water_demand = vec![1.0; daily_hours]; // Same as in simulation
+    let electricity_demand = vec![2.0; daily_hours];
 
     plot_data2(
         &electricity_demand,
