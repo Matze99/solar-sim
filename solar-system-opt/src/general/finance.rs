@@ -61,8 +61,6 @@ pub fn calculate_optimized_roi(
         .map(|(cost_no_solar, cost_with_solar)| cost_no_solar - cost_with_solar)
         .collect();
 
-    println!("Annual savings: {:?}", annual_savings);
-
     // Define the function to find the root of: f(ROI) = (sum / I_0)^{1/N} - 1 - ROI
     let equation_function = |roi: f64| -> f64 {
         let mut sum = 0.0;
