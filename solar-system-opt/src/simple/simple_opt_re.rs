@@ -1,16 +1,13 @@
 use ems_model::building::electricity::ElectricityRate;
 use good_lp::variables;
-use good_lp::{Expression, Solution, SolverModel, constraint, variable};
+use good_lp::{constraint, variable, Expression, Solution, SolverModel};
 
-use crate::general::electricity_demand::create_scaled_load_curve_from_csv;
+use crate::general::electricity_demand::{create_scaled_load_curve_from_csv, MonthlyDemand};
 use crate::simple::plot::{plot_hourly_averages, plot_hourly_averages_with_title};
 use crate::simple::solar_system_utils::{
-    HeatingType, InsulationLevel, OptimizationConfig, SimpleOptimizationResults,
-    calculate_heat_demand, calculate_heat_demand_with_insulation,
-    calculate_heat_pump_electricity_consumption, load_demand_from_csv,
-    load_solar_radiance_from_csv,
+    load_demand_from_csv, load_solar_radiance_from_csv, HeatingType, InsulationLevel,
+    OptimizationConfig, SimpleOptimizationResults,
 };
-use ems_model::building::insulation::{BuildingTypeEnum, YearCategoryESEnum};
 
 const NUM_HOURS: usize = 8760;
 
@@ -35,6 +32,27 @@ fn get_date_string(day: usize) -> String {
     format!("{} {}", months[month], remaining_days + 1)
 }
 
+pub fn get_scaled_electricity_demand(
+    monthly_demand: Option<MonthlyDemand>,
+    electricity_usage: f64,
+    electricity_demand: Vec<f64>,
+) -> Result<Vec<f64>, Box<dyn std::error::Error>> {
+    let scaled_electricity_demand = if let Some(ref monthly_demand) = monthly_demand {
+        // Generate scaled load curve using monthly demand and base CSV data
+        create_scaled_load_curve_from_csv(monthly_demand, "data/demand.csv")?
+            .iter()
+            .map(|&demand| demand * 1000.0) // Convert from kWh to Wh to match existing scaling
+            .collect()
+    } else {
+        // Use the provided electricity_demand and scale by desired annual usage
+        electricity_demand
+            .iter()
+            .map(|&demand| demand * (electricity_usage / 4173440.0))
+            .collect()
+    };
+    Ok(scaled_electricity_demand)
+}
+
 pub fn run_simple_opt(
     config: OptimizationConfig,
     pv_cap_w_max: f64,
@@ -43,20 +61,12 @@ pub fn run_simple_opt(
     electricity_rate: ElectricityRate,
 ) -> Result<SimpleOptimizationResults, Box<dyn std::error::Error>> {
     // Use monthly demand to generate scaled load curve if available, otherwise use provided electricity_demand
-    let scaled_electricity_demand: Vec<f64> =
-        if let Some(ref monthly_demand) = config.monthly_demand {
-            // Generate scaled load curve using monthly demand and base CSV data
-            create_scaled_load_curve_from_csv(monthly_demand, "data/demand.csv")?
-                .iter()
-                .map(|&demand| demand * 1000.0) // Convert from kWh to Wh to match existing scaling
-                .collect()
-        } else {
-            // Use the provided electricity_demand and scale by desired annual usage
-            electricity_demand
-                .iter()
-                .map(|&demand| demand * (config.electricity_usage / 4173440.0))
-                .collect()
-        };
+    let scaled_electricity_demand = get_scaled_electricity_demand(
+        config.monthly_demand.clone(),
+        config.electricity_usage.clone(),
+        electricity_demand,
+    )?;
+
     let electricity_rate_hourly = electricity_rate.to_yearly_hourly_rates();
     // Pre-calculate battery constants
     let storage_retention_bat = 1.0 - config.storage_loss_bat;
@@ -68,7 +78,6 @@ pub fn run_simple_opt(
             cap_pv;
             cap_grid;
             cst_battery;
-            cap_heat_pump;
     }
 
     // energy usage of own production
@@ -77,65 +86,12 @@ pub fn run_simple_opt(
     let mut e_grid: Vec<good_lp::Variable> = Vec::with_capacity(NUM_HOURS);
     // energy overproduction
     let mut e_o: Vec<good_lp::Variable> = Vec::with_capacity(NUM_HOURS); // overproduction
-    // battery storage variables
+                                                                         // battery storage variables
     let mut est_battery: Vec<good_lp::Variable> = Vec::with_capacity(NUM_HOURS);
     let mut est_in_battery: Vec<good_lp::Variable> = Vec::with_capacity(NUM_HOURS);
     let mut est_out_battery: Vec<good_lp::Variable> = Vec::with_capacity(NUM_HOURS);
     // electric car charging variables
     let mut e_car_charge: Vec<good_lp::Variable> = Vec::with_capacity(NUM_HOURS);
-    // heat pump variables
-    let mut e_heat_pump: Vec<good_lp::Variable> = Vec::with_capacity(NUM_HOURS);
-
-    // Load heat pump data if enabled
-    let heat_demand = if config.heat_pump_enabled {
-        // Use insulation-based calculation with when2heat data
-        match calculate_heat_demand_with_insulation(
-            config.house_square_meters,
-            config.building_type,
-            config.construction_period,
-            config.insulation_standard,
-        ) {
-            Ok(insulation_heat_demand) => {
-                println!("Using insulation-based heating demand calculation");
-                insulation_heat_demand
-                    .iter()
-                    .map(|&heat| heat * 10.0)
-                    .collect() // TODO: remove this. This is a hack to make it work for now
-            }
-            Err(e) => {
-                println!(
-                    "Warning: Failed to load insulation-based heat demand: {}. Falling back to temperature-based calculation.",
-                    e
-                );
-                calculate_heat_demand(
-                    config.house_square_meters,
-                    &config.insulation_level,
-                    &config.monthly_temperatures,
-                )
-            }
-        }
-    } else {
-        vec![0.0; NUM_HOURS]
-    };
-
-    // Calculate heat pump electricity consumption using COP values if heat pump is enabled
-    let heat_pump_electricity_consumption = if config.heat_pump_enabled {
-        match calculate_heat_pump_electricity_consumption(&heat_demand, &config.heating_type) {
-            Ok(electricity) => {
-                println!("Using COP-based heat pump electricity consumption calculation");
-                electricity
-            }
-            Err(e) => {
-                println!(
-                    "Warning: Failed to calculate COP-based electricity consumption: {}. Using default COP of 3.0.",
-                    e
-                );
-                heat_demand.iter().map(|&heat| heat / 3.0).collect()
-            }
-        }
-    } else {
-        vec![0.0; NUM_HOURS]
-    };
 
     // Create variables for each hour
     for _t in 0..NUM_HOURS {
@@ -146,7 +102,6 @@ pub fn run_simple_opt(
         est_in_battery.push(vars.add(variable().min(0.0))); // Battery input energy (non-negative)
         est_out_battery.push(vars.add(variable().min(0.0))); // Battery output energy (non-negative)
         e_car_charge.push(vars.add(variable().min(0.0))); // Electric car charging energy (non-negative)
-        e_heat_pump.push(vars.add(variable().min(0.0))); // Heat pump energy consumption (non-negative)
     }
 
     // Build objective function
@@ -163,7 +118,6 @@ pub fn run_simple_opt(
     objective += cap_pv / 1000.0 * config.inv_pv * config.annuity;
     objective += cap_grid / 1000.0 * config.inv_grid;
     objective += cst_battery / 1000.0 * config.inv_bat * config.annuity;
-    objective += cap_heat_pump / 1000.0 * config.inv_heat_pump * config.annuity;
 
     // Operating costs and revenues (time-dependent)
     for t in 0..NUM_HOURS {
@@ -188,7 +142,6 @@ pub fn run_simple_opt(
         model = model.with(constraint!(cst_battery >= 0.0));
         model = model.with(constraint!(cst_battery <= config.bat_value));
     }
-    model = model.with(constraint!(cap_heat_pump >= 0.0));
 
     // Battery initialization constraint
     model = model.with(constraint!(est_battery[0] == 0.0));
@@ -210,7 +163,6 @@ pub fn run_simple_opt(
         model = model.with(constraint!(
             e_pv[t] + e_grid[t] - elec_demand_t - est_in_battery[t] + est_out_battery[t]
                 - e_car_charge[t]
-                - e_heat_pump[t]
                 == 0.0
         ));
 
@@ -225,20 +177,6 @@ pub fn run_simple_opt(
 
         // Battery capacity limit
         model = model.with(constraint!(cst_battery - est_battery[t] >= 0.0));
-
-        // Heat pump constraints
-        if config.heat_pump_enabled {
-            // Heat pump capacity limit
-            model = model.with(constraint!(cap_heat_pump - e_heat_pump[t] >= 0.0));
-
-            // Use pre-calculated electricity consumption based on COP
-            model = model.with(constraint!(
-                e_heat_pump[t] == heat_pump_electricity_consumption[t]
-            ));
-        } else {
-            // If heat pump is disabled, set consumption to zero
-            model = model.with(constraint!(e_heat_pump[t] == 0.0));
-        }
 
         // C-rate constraints
         model = model.with(constraint!(
@@ -290,8 +228,13 @@ pub fn run_simple_opt(
         ));
     }
 
+    // Time the optimization
+    let start_time = std::time::Instant::now();
+    let opt_result = model.solve();
+    let optimization_duration = start_time.elapsed();
+
     // Solve the optimization
-    match model.solve() {
+    match opt_result {
         Ok(solution) => {
             // Calculate and print results
             let pv_sum: f64 = e_pv.iter().map(|&var| solution.value(var)).sum();
@@ -301,8 +244,6 @@ pub fn run_simple_opt(
             let battery_in_sum: f64 = est_in_battery.iter().map(|&var| solution.value(var)).sum();
             let battery_out_sum: f64 = est_out_battery.iter().map(|&var| solution.value(var)).sum();
             let car_charging_sum: f64 = e_car_charge.iter().map(|&var| solution.value(var)).sum();
-            let heat_pump_sum: f64 = e_heat_pump.iter().map(|&var| solution.value(var)).sum();
-            let heat_demand_sum: f64 = heat_demand.iter().sum();
 
             // Collect hourly data for struct
             let pv_production: Vec<f64> = e_pv.iter().map(|&var| solution.value(var)).collect();
@@ -316,8 +257,6 @@ pub fn run_simple_opt(
                 .iter()
                 .map(|&var| solution.value(var))
                 .collect();
-            let heat_pump_consumption_hourly: Vec<f64> =
-                e_heat_pump.iter().map(|&var| solution.value(var)).collect();
 
             // Calculate total PV production (consumed + overproduction)
             let total_pv_production: Vec<f64> = pv_production
@@ -332,16 +271,6 @@ pub fn run_simple_opt(
                 .zip(car_charging_hourly.iter())
                 .map(|(&demand, &charging)| demand + charging)
                 .collect();
-
-            // Calculate heat pump capacity from maximum electricity consumption
-            let heat_pump_capacity_kw = if config.heat_pump_enabled {
-                heat_pump_electricity_consumption
-                    .iter()
-                    .fold(0.0_f64, |max, &val| max.max(val))
-                    / 1000.0
-            } else {
-                0.0
-            };
 
             // Calculate autarky without battery by checking when user consumes directly from PV
             // and summing that up, then dividing by total demand
@@ -368,7 +297,6 @@ pub fn run_simple_opt(
                 pv_capacity_kw: solution.value(cap_pv) / 1000.0,
                 grid_capacity_kw: solution.value(cap_grid) / 1000.0,
                 battery_capacity_kwh: solution.value(cst_battery) / 1000.0,
-                heat_pump_capacity_kw,
                 annual_pv_production_kwh: (pv_sum + overproduction) / 1000.0,
                 annual_grid_energy_kwh: grid_sum / 1000.0,
                 annual_battery_in_kwh: battery_in_sum / 1000.0,
@@ -381,8 +309,6 @@ pub fn run_simple_opt(
                 } else {
                     0.0
                 },
-                annual_heat_pump_energy_kwh: heat_pump_sum / 1000.0,
-                annual_heat_demand_kwh: heat_demand_sum / 1000.0,
                 pv_coverage_percent: (pv_sum / total_demand) * 100.0,
                 autarky: (1.0 - grid_sum / total_demand) * 100.0,
                 autarky_without_battery,
@@ -394,9 +320,8 @@ pub fn run_simple_opt(
                 hourly_total_pv_production: total_pv_production,
                 hourly_total_electricity_demand: total_electricity_demand,
                 hourly_electricity_demand_base: scaled_electricity_demand,
-                hourly_heat_pump_consumption: heat_pump_consumption_hourly,
-                hourly_heat_demand: heat_demand,
                 config: config.clone(),
+                optimization_duration_ms: optimization_duration.as_millis(),
             })
         }
         Err(e) => Err(format!("Optimization failed: {:?}", e).into()),
@@ -425,12 +350,6 @@ pub fn run_simple_opt_with_output(
     println!("PV Capacity: {:.2} kW", results.pv_capacity_kw);
     println!("Grid Capacity: {:.2} kW", results.grid_capacity_kw);
     println!("Battery Capacity: {:.2} kWh", results.battery_capacity_kwh);
-    if results.config.heat_pump_enabled {
-        println!(
-            "Heat Pump Capacity: {:.2} kW",
-            results.heat_pump_capacity_kw
-        );
-    }
     println!(
         "Annual PV Production: {:.2} kWh",
         results.annual_pv_production_kwh
@@ -457,16 +376,6 @@ pub fn run_simple_opt_with_output(
             results.required_car_energy_kwh
         );
     }
-    if results.config.heat_pump_enabled {
-        println!(
-            "Annual Heat Pump Energy: {:.2} kWh",
-            results.annual_heat_pump_energy_kwh
-        );
-        println!(
-            "Annual Heat Demand: {:.2} kWh",
-            results.annual_heat_demand_kwh
-        );
-    }
     println!(
         "Annual Overproduction: {:.2} kWh",
         results.annual_overproduction_kwh
@@ -480,6 +389,10 @@ pub fn run_simple_opt_with_output(
     println!(
         "Autarky without Battery: {:.1}%",
         results.autarky_without_battery
+    );
+    println!(
+        "Optimization Duration: {} ms",
+        results.optimization_duration_ms
     );
     println!("===================================");
 
@@ -552,53 +465,6 @@ pub fn run_simple_opt_with_output(
     Ok(())
 }
 
-pub fn run_simple_opt_loop(
-    mut config: OptimizationConfig,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let solar_irradiance = load_solar_radiance_from_csv();
-    let (_hot_water_demand, electricity_demand) = load_demand_from_csv();
-
-    config.feed_in_tariff = 0.0;
-    config.fc_grid = 0.30; // Realistic grid electricity cost (30 cents per kWh)
-    config.bat_value = 100000.0;
-    config.bat_fixed = false;
-    config.pv_capacity_max = 100000.0;
-    config.pv_fixed = false;
-
-    // Enable electric car with example parameters
-    config.electric_car_enabled = false;
-    config.car_daily_km = 50.0;
-    config.car_efficiency_kwh_per_km = 15.0;
-    config.car_battery_size_kwh = 20.0;
-    config.car_charge_during_day = true;
-    config.electricity_usage = 5500000.0;
-
-    // Enable heat pump with example parameters
-    config.heat_pump_enabled = false;
-    config.house_square_meters = 120.0;
-    config.insulation_level = InsulationLevel::Moderate;
-    config.monthly_temperatures = [
-        20.0, 20.0, 20.0, 20.0, 20.0, 20.0, 20.0, 20.0, 20.0, 20.0, 20.0, 20.0,
-    ];
-    config.inv_heat_pump = 1500.0; // Investment cost per kW
-
-    // Set building configuration parameters
-    config.building_type = BuildingTypeEnum::SingleFamily;
-    config.construction_period = YearCategoryESEnum::Between1980and2006;
-    config.insulation_standard = InsulationLevel::Moderate;
-    config.optimize_for_autonomy = false;
-
-    run_simple_opt_with_output(
-        config.clone(),
-        config.pv_capacity_max,
-        solar_irradiance,
-        electricity_demand,
-        None,
-    )?;
-
-    Ok(())
-}
-
 /// Run simple optimization with specific days to plot
 ///
 /// # Arguments
@@ -650,4 +516,41 @@ pub fn run_simple_opt_with_day_plots(
     )?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_run_simple_opt() {
+        let solar_irradiance = load_solar_radiance_from_csv();
+        let electricity_demand = load_demand_from_csv();
+        let mut config = OptimizationConfig::default();
+        config.feed_in_tariff = 0.0;
+        config.fc_grid = 0.15;
+        config.electricity_usage = 8000000.0;
+
+        let results = run_simple_opt(
+            config.clone(),
+            100000.0,
+            solar_irradiance,
+            electricity_demand.1,
+            ElectricityRate::fixed(0.1),
+        )
+        .unwrap();
+        println!(
+            "Simple optimization took: {} ms",
+            results.optimization_duration_ms
+        );
+        println!("Results: {:?}", results.annual_overproduction_kwh);
+        assert_eq!(
+            results.annual_grid_energy_kwh + results.annual_pv_production_kwh
+                - results.annual_overproduction_kwh,
+            config.electricity_usage
+        );
+        assert_eq!(results.pv_capacity_kw, 1000.0);
+        assert_eq!(results.grid_capacity_kw, 0.0);
+        assert_eq!(results.battery_capacity_kwh, 0.0);
+    }
 }

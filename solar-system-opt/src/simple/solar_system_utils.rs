@@ -365,7 +365,6 @@ pub struct SimpleOptimizationResults {
     pub pv_capacity_kw: f64,
     pub grid_capacity_kw: f64,
     pub battery_capacity_kwh: f64,
-    pub heat_pump_capacity_kw: f64,
 
     // Annual totals
     pub annual_pv_production_kwh: f64,
@@ -376,8 +375,6 @@ pub struct SimpleOptimizationResults {
     pub annual_overproduction_kwh: f64,
     pub annual_electricity_demand_kwh: f64,
     pub required_car_energy_kwh: f64,
-    pub annual_heat_pump_energy_kwh: f64,
-    pub annual_heat_demand_kwh: f64,
 
     // Coverage metrics
     pub pv_coverage_percent: f64,
@@ -393,11 +390,12 @@ pub struct SimpleOptimizationResults {
     pub hourly_total_pv_production: Vec<f64>,
     pub hourly_total_electricity_demand: Vec<f64>,
     pub hourly_electricity_demand_base: Vec<f64>,
-    pub hourly_heat_pump_consumption: Vec<f64>,
-    pub hourly_heat_demand: Vec<f64>,
 
     // Configuration used
     pub config: OptimizationConfig,
+
+    // Timing information
+    pub optimization_duration_ms: u128,
 }
 
 #[derive(Debug, Clone, Copy)]
