@@ -61,6 +61,8 @@ pub fn calculate_optimized_roi(
         .map(|(cost_no_solar, cost_with_solar)| cost_no_solar - cost_with_solar)
         .collect();
 
+    println!("Annual savings: {:?}", annual_savings);
+
     // Define the function to find the root of: f(ROI) = (sum / I_0)^{1/N} - 1 - ROI
     let equation_function = |roi: f64| -> f64 {
         let mut sum = 0.0;
@@ -213,7 +215,7 @@ mod tests {
         simulation_results.pv_capacity_kw = 2.45;
         simulation_results.annual_grid_energy_kwh =
             simulation_results.config.electricity_usage * 0.57 / 1000.0;
-        
+
         let optimized_roi = calculate_optimized_roi(simulation_results, num_years, 120.0).unwrap();
 
         println!("Optimized ROI: {:?}", optimized_roi);
@@ -222,5 +224,28 @@ mod tests {
         assert!((optimized_roi.net_present_value - 496.03).abs() < 0.5);
         println!("Payback period: {:?}", optimized_roi.payback_period);
         assert!((optimized_roi.payback_period.unwrap() - 4.417).abs() < 0.02);
+    }
+
+    #[test]
+    fn test_real_financial_rentability_with_yearly() {
+        let mut simulation_results = SimpleOptimizationResults::default();
+        let num_years = 25;
+        simulation_results.config.inv_pv = 991.7355371900827;
+        simulation_results.config.electricity_price_increase = 0.0;
+        simulation_results.config.fc_grid = 0.15;
+        simulation_results.config.electricity_usage = 9000000.0;
+        simulation_results.battery_capacity_kwh = 0.0;
+        simulation_results.pv_capacity_kw = 0.9;
+        simulation_results.annual_grid_energy_kwh =
+            simulation_results.config.electricity_usage * (1.0 - 0.157) / 1000.0;
+
+        let optimized_roi = calculate_optimized_roi(simulation_results, num_years, 0.0).unwrap();
+
+        println!("Optimized ROI: {:?}", optimized_roi);
+        assert!((optimized_roi.roi - 0.34).abs() < 1e-3);
+        println!("Net present value: {:?}", optimized_roi.net_present_value);
+        assert!((optimized_roi.net_present_value - 308.44).abs() < 0.5);
+        println!("Payback period: {:?}", optimized_roi.payback_period);
+        assert!((optimized_roi.payback_period.unwrap() - 2.9).abs() < 0.02);
     }
 }
