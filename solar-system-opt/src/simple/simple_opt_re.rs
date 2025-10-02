@@ -728,7 +728,7 @@ mod tests {
         config.feed_in_tariff = 0.0;
         config.fc_grid = 0.15;
         config.electricity_usage = 8000000.0;
-        config.bat_value = 0.0;
+        config.bat_value = 100000.0;
 
         let results = run_simple_opt(
             config.clone(),
@@ -736,7 +736,7 @@ mod tests {
             solar_irradiance,
             electricity_demand.1,
             ElectricityRate::fixed(0.1),
-            good_lp::clarabel,
+            good_lp::highs,
         )
         .unwrap();
         println!(
