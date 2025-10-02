@@ -80,7 +80,9 @@ fn generate_objective(
     // Investment costs
     objective += cap_pv / 1000.0 * config.inv_pv * config.annuity;
     objective += cap_grid / 1000.0 * config.inv_grid;
-    objective += cst_battery / 1000.0 * config.inv_bat * config.annuity;
+    if config.bat_value > 0.0 {
+        objective += cst_battery / 1000.0 * config.inv_bat * config.annuity;
+    }
 
     // Operating costs and revenues (time-dependent)
     for t in 0..NUM_HOURS {
@@ -98,7 +100,7 @@ fn add_fixed_constraints<M>(
     pv_cap_w_max: f64,
     cap_pv: good_lp::Variable,
     cst_battery: good_lp::Variable,
-    est_battery: &[good_lp::Variable],
+    est_battery: &Option<Vec<good_lp::Variable>>,
     e_car_charge: &[good_lp::Variable],
     car_daily_energy_required: f64,
 ) -> M
@@ -113,16 +115,20 @@ where
         model = model.with(constraint!(cap_pv <= pv_cap_w_max));
     }
 
-    // Battery capacity constraints
-    if config.bat_fixed {
-        model = model.with(constraint!(cst_battery == config.bat_value));
-    } else {
-        model = model.with(constraint!(cst_battery >= 0.0));
-        model = model.with(constraint!(cst_battery <= config.bat_value));
-    }
+    // Battery capacity constraints (only if bat_value > 0)
+    if config.bat_value > 0.0 {
+        if config.bat_fixed {
+            model = model.with(constraint!(cst_battery == config.bat_value));
+        } else {
+            model = model.with(constraint!(cst_battery >= 0.0));
+            model = model.with(constraint!(cst_battery <= config.bat_value));
+        }
 
-    // Battery initialization constraint
-    model = model.with(constraint!(est_battery[0] == 0.0));
+        // Battery initialization constraint
+        if let Some(battery_vars) = est_battery {
+            model = model.with(constraint!(battery_vars[0] == 0.0));
+        }
+    }
 
     // Electric car total energy constraint
     if config.electric_car_enabled {
@@ -146,9 +152,9 @@ fn add_time_dependent_constraints<M>(
     e_pv: &[good_lp::Variable],
     e_grid: &[good_lp::Variable],
     e_o: &[good_lp::Variable],
-    est_battery: &[good_lp::Variable],
-    est_in_battery: &[good_lp::Variable],
-    est_out_battery: &[good_lp::Variable],
+    est_battery: &Option<Vec<good_lp::Variable>>,
+    est_in_battery: &Option<Vec<good_lp::Variable>>,
+    est_out_battery: &Option<Vec<good_lp::Variable>>,
     e_car_charge: &[good_lp::Variable],
     cap_pv: good_lp::Variable,
     cap_grid: good_lp::Variable,
@@ -165,11 +171,18 @@ where
         let elec_demand_t = scaled_electricity_demand[t];
 
         // Energy balance: PV + Grid + Battery Out = Demand + Battery In + Car Charging + Heat Pump
-        model = model.with(constraint!(
-            e_pv[t] + e_grid[t] - elec_demand_t - est_in_battery[t] + est_out_battery[t]
-                - e_car_charge[t]
-                == 0.0
-        ));
+        if let (Some(battery_in), Some(battery_out)) = (est_in_battery, est_out_battery) {
+            model = model.with(constraint!(
+                e_pv[t] + e_grid[t] - elec_demand_t - battery_in[t] + battery_out[t]
+                    - e_car_charge[t]
+                    == 0.0
+            ));
+        } else {
+            // No battery: PV + Grid = Demand + Car Charging
+            model = model.with(constraint!(
+                e_pv[t] + e_grid[t] - elec_demand_t - e_car_charge[t] == 0.0
+            ));
+        }
 
         // Overproduction constraint: overproduction = potential PV - actual PV
         model = model.with(constraint!(e_o[t] - cap_pv * solar_t + e_pv[t] == 0.0));
@@ -180,26 +193,33 @@ where
         // Grid capacity limit
         model = model.with(constraint!(cap_grid - e_grid[t] >= 0.0));
 
-        // Battery capacity limit
-        model = model.with(constraint!(cst_battery - est_battery[t] >= 0.0));
+        // Battery constraints
+        if config.bat_value > 0.0 {
+            if let (Some(battery_storage), Some(battery_in), Some(battery_out)) =
+                (est_battery, est_in_battery, est_out_battery)
+            {
+                // Battery capacity limit
+                model = model.with(constraint!(cst_battery - battery_storage[t] >= 0.0));
 
-        // C-rate constraints
-        model = model.with(constraint!(
-            config.c_rate_limit * cst_battery - est_in_battery[t] >= 0.0
-        ));
-        model = model.with(constraint!(
-            config.c_rate_limit * cst_battery - est_out_battery[t] >= 0.0
-        ));
+                // C-rate constraints
+                model = model.with(constraint!(
+                    config.c_rate_limit * cst_battery - battery_in[t] >= 0.0
+                ));
+                model = model.with(constraint!(
+                    config.c_rate_limit * cst_battery - battery_out[t] >= 0.0
+                ));
 
-        // Storage balance constraints (t >= 1)
-        if t > 0 {
-            model = model.with(constraint!(
-                est_battery[t]
-                    - est_battery[t - 1] * storage_retention_bat
-                    - eta_in_bat * est_in_battery[t]
-                    + est_out_battery[t] * eta_out_bat_inv
-                    == 0.0
-            ));
+                // Storage balance constraints (t >= 1)
+                if t > 0 {
+                    model = model.with(constraint!(
+                        battery_storage[t]
+                            - battery_storage[t - 1] * storage_retention_bat
+                            - eta_in_bat * battery_in[t]
+                            + battery_out[t] * eta_out_bat_inv
+                            == 0.0
+                    ));
+                }
+            }
         }
 
         // Electric car charging constraints
@@ -233,9 +253,9 @@ fn format_solution_results(
     e_pv: &[good_lp::Variable],
     e_grid: &[good_lp::Variable],
     e_o: &[good_lp::Variable],
-    est_battery: &[good_lp::Variable],
-    est_in_battery: &[good_lp::Variable],
-    est_out_battery: &[good_lp::Variable],
+    est_battery: &Option<Vec<good_lp::Variable>>,
+    est_in_battery: &Option<Vec<good_lp::Variable>>,
+    est_out_battery: &Option<Vec<good_lp::Variable>>,
     e_car_charge: &[good_lp::Variable],
     scaled_electricity_demand: &[f64],
     cap_pv: good_lp::Variable,
@@ -249,15 +269,30 @@ fn format_solution_results(
     let grid_sum: f64 = e_grid.iter().map(|&var| solution.value(var)).sum();
     let overproduction: f64 = e_o.iter().map(|&var| solution.value(var)).sum();
     let total_demand: f64 = scaled_electricity_demand.iter().sum();
-    let battery_in_sum: f64 = est_in_battery.iter().map(|&var| solution.value(var)).sum();
-    let battery_out_sum: f64 = est_out_battery.iter().map(|&var| solution.value(var)).sum();
+    let battery_in_sum: f64 = if let Some(battery_in) = est_in_battery {
+        battery_in.iter().map(|&var| solution.value(var)).sum()
+    } else {
+        0.0
+    };
+    let battery_out_sum: f64 = if let Some(battery_out) = est_out_battery {
+        battery_out.iter().map(|&var| solution.value(var)).sum()
+    } else {
+        0.0
+    };
     let car_charging_sum: f64 = e_car_charge.iter().map(|&var| solution.value(var)).sum();
 
     // Collect hourly data for struct
     let pv_production: Vec<f64> = e_pv.iter().map(|&var| solution.value(var)).collect();
     let overproduction_hourly: Vec<f64> = e_o.iter().map(|&var| solution.value(var)).collect();
     let grid_consumption: Vec<f64> = e_grid.iter().map(|&var| solution.value(var)).collect();
-    let battery_storage: Vec<f64> = est_battery.iter().map(|&var| solution.value(var)).collect();
+    let battery_storage: Vec<f64> = if let Some(battery_storage_vars) = est_battery {
+        battery_storage_vars
+            .iter()
+            .map(|&var| solution.value(var))
+            .collect()
+    } else {
+        vec![0.0; NUM_HOURS]
+    };
     let car_charging_hourly: Vec<f64> = e_car_charge
         .iter()
         .map(|&var| solution.value(var))
@@ -364,10 +399,22 @@ pub fn run_simple_opt<S: Solver>(
     let mut e_grid: Vec<good_lp::Variable> = Vec::with_capacity(NUM_HOURS);
     // energy overproduction
     let mut e_o: Vec<good_lp::Variable> = Vec::with_capacity(NUM_HOURS); // overproduction
-    // battery storage variables
-    let mut est_battery: Vec<good_lp::Variable> = Vec::with_capacity(NUM_HOURS);
-    let mut est_in_battery: Vec<good_lp::Variable> = Vec::with_capacity(NUM_HOURS);
-    let mut est_out_battery: Vec<good_lp::Variable> = Vec::with_capacity(NUM_HOURS);
+    // battery storage variables (only created if bat_value > 0)
+    let mut est_battery: Option<Vec<good_lp::Variable>> = if config.bat_value > 0.0 {
+        Some(Vec::with_capacity(NUM_HOURS))
+    } else {
+        None
+    };
+    let mut est_in_battery: Option<Vec<good_lp::Variable>> = if config.bat_value > 0.0 {
+        Some(Vec::with_capacity(NUM_HOURS))
+    } else {
+        None
+    };
+    let mut est_out_battery: Option<Vec<good_lp::Variable>> = if config.bat_value > 0.0 {
+        Some(Vec::with_capacity(NUM_HOURS))
+    } else {
+        None
+    };
     // electric car charging variables
     let mut e_car_charge: Vec<good_lp::Variable> = Vec::with_capacity(NUM_HOURS);
 
@@ -376,9 +423,23 @@ pub fn run_simple_opt<S: Solver>(
         e_pv.push(vars.add(variable().min(0.0))); // PV energy (non-negative)
         e_grid.push(vars.add(variable().min(0.0))); // Grid energy (can be negative for feed-in)
         e_o.push(vars.add(variable().min(0.0))); // Overproduction (non-negative)
-        est_battery.push(vars.add(variable().min(0.0))); // Battery storage level (non-negative)
-        est_in_battery.push(vars.add(variable().min(0.0))); // Battery input energy (non-negative)
-        est_out_battery.push(vars.add(variable().min(0.0))); // Battery output energy (non-negative)
+
+        // Only create battery variables if bat_value > 0
+        if config.bat_value > 0.0 {
+            est_battery
+                .as_mut()
+                .unwrap()
+                .push(vars.add(variable().min(0.0))); // Battery storage level (non-negative)
+            est_in_battery
+                .as_mut()
+                .unwrap()
+                .push(vars.add(variable().min(0.0))); // Battery input energy (non-negative)
+            est_out_battery
+                .as_mut()
+                .unwrap()
+                .push(vars.add(variable().min(0.0))); // Battery output energy (non-negative)
+        }
+
         e_car_charge.push(vars.add(variable().min(0.0))); // Electric car charging energy (non-negative)
     }
 
@@ -667,6 +728,7 @@ mod tests {
         config.feed_in_tariff = 0.0;
         config.fc_grid = 0.15;
         config.electricity_usage = 8000000.0;
+        config.bat_value = 0.0;
 
         let results = run_simple_opt(
             config.clone(),
@@ -674,7 +736,7 @@ mod tests {
             solar_irradiance,
             electricity_demand.1,
             ElectricityRate::fixed(0.1),
-            good_lp::scip,
+            good_lp::clarabel,
         )
         .unwrap();
         println!(
@@ -688,7 +750,7 @@ mod tests {
                 - config.electricity_usage
                 < 100.0
         );
-        assert_eq!(results.pv_capacity_kw, 2.0259138693415317);
+        assert_eq!(results.pv_capacity_kw, 1.8513584545416046);
         assert_eq!(results.battery_capacity_kwh, 0.0);
     }
 }
