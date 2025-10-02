@@ -1,6 +1,6 @@
 use ems_model::building::electricity::ElectricityRate;
-use good_lp::variables;
 use good_lp::{Expression, SolverModel, constraint, variable};
+use good_lp::{Solver, variables};
 
 use crate::general::electricity_demand::{MonthlyDemand, create_scaled_load_curve_from_csv};
 use crate::simple::plot::{plot_hourly_averages, plot_hourly_averages_with_title};
@@ -330,12 +330,13 @@ fn format_solution_results(
     }
 }
 
-pub fn run_simple_opt(
+pub fn run_simple_opt<S: Solver>(
     config: OptimizationConfig,
     pv_cap_w_max: f64,
     solar_irradiance: Vec<f64>,
     electricity_demand: Vec<f64>,
     electricity_rate: ElectricityRate,
+    solver: S,
 ) -> Result<SimpleOptimizationResults, Box<dyn std::error::Error>> {
     // Use monthly demand to generate scaled load curve if available, otherwise use provided electricity_demand
     let scaled_electricity_demand = get_scaled_electricity_demand(
@@ -392,7 +393,7 @@ pub fn run_simple_opt(
         &e_o,
     );
     // Create model
-    let mut model = vars.minimise(objective).using(good_lp::clarabel);
+    let mut model = vars.minimise(objective).using(solver);
 
     // Calculate electric car parameters if enabled
     let car_daily_energy_required = if config.electric_car_enabled {
@@ -477,6 +478,7 @@ pub fn run_simple_opt_with_output(
         solar_irradiance,
         electricity_demand,
         ElectricityRate::fixed(config.fc_grid),
+        good_lp::clarabel,
     )?;
 
     // Print results
@@ -672,6 +674,7 @@ mod tests {
             solar_irradiance,
             electricity_demand.1,
             ElectricityRate::fixed(0.1),
+            good_lp::scip,
         )
         .unwrap();
         println!(
