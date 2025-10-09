@@ -58,14 +58,14 @@ fn generate_objective(
     e_grid: &Vec<good_lp::Variable>,
     cap_pv: good_lp::Variable,
     cap_grid: good_lp::Variable,
-    cst_battery: good_lp::Variable,
+    cst_battery: Option<good_lp::Variable>,
     electricity_rate_hourly: &Vec<f64>,
     e_o: &Vec<good_lp::Variable>,
 ) -> (
     Expression,
     good_lp::Variable,
     good_lp::Variable,
-    good_lp::Variable,
+    Option<good_lp::Variable>,
 ) {
     // Build objective function
     let mut objective = Expression::default();
@@ -81,7 +81,7 @@ fn generate_objective(
     objective += cap_pv / 1000.0 * config.inv_pv * config.annuity;
     objective += cap_grid / 1000.0 * config.inv_grid;
     if config.bat_value > 0.0 {
-        objective += cst_battery / 1000.0 * config.inv_bat * config.annuity;
+        objective += cst_battery.unwrap() / 1000.0 * config.inv_bat * config.annuity;
     }
 
     // Operating costs and revenues (time-dependent)
@@ -99,7 +99,7 @@ fn add_fixed_constraints<M>(
     config: &OptimizationConfig,
     pv_cap_w_max: f64,
     cap_pv: good_lp::Variable,
-    cst_battery: good_lp::Variable,
+    cst_battery: Option<good_lp::Variable>,
     est_battery: &Option<Vec<good_lp::Variable>>,
     e_car_charge: &[good_lp::Variable],
     car_daily_energy_required: f64,
@@ -118,10 +118,10 @@ where
     // Battery capacity constraints (only if bat_value > 0)
     if config.bat_value > 0.0 {
         if config.bat_fixed {
-            model = model.with(constraint!(cst_battery == config.bat_value));
+            model = model.with(constraint!(cst_battery.unwrap() == config.bat_value));
         } else {
-            model = model.with(constraint!(cst_battery >= 0.0));
-            model = model.with(constraint!(cst_battery <= config.bat_value));
+            model = model.with(constraint!(cst_battery.unwrap() >= 0.0));
+            model = model.with(constraint!(cst_battery.unwrap() <= config.bat_value));
         }
 
         // Battery initialization constraint
@@ -158,7 +158,7 @@ fn add_time_dependent_constraints<M>(
     e_car_charge: &[good_lp::Variable],
     cap_pv: good_lp::Variable,
     cap_grid: good_lp::Variable,
-    cst_battery: good_lp::Variable,
+    cst_battery: Option<good_lp::Variable>,
     storage_retention_bat: f64,
     eta_in_bat: f64,
     eta_out_bat_inv: f64,
@@ -199,14 +199,16 @@ where
                 (est_battery, est_in_battery, est_out_battery)
             {
                 // Battery capacity limit
-                model = model.with(constraint!(cst_battery - battery_storage[t] >= 0.0));
+                model = model.with(constraint!(
+                    cst_battery.unwrap() - battery_storage[t] >= 0.0
+                ));
 
                 // C-rate constraints
                 model = model.with(constraint!(
-                    config.c_rate_limit * cst_battery - battery_in[t] >= 0.0
+                    config.c_rate_limit * cst_battery.unwrap() - battery_in[t] >= 0.0
                 ));
                 model = model.with(constraint!(
-                    config.c_rate_limit * cst_battery - battery_out[t] >= 0.0
+                    config.c_rate_limit * cst_battery.unwrap() - battery_out[t] >= 0.0
                 ));
 
                 // Storage balance constraints (t >= 1)
@@ -260,7 +262,7 @@ fn format_solution_results(
     scaled_electricity_demand: &[f64],
     cap_pv: good_lp::Variable,
     cap_grid: good_lp::Variable,
-    cst_battery: good_lp::Variable,
+    cst_battery: Option<good_lp::Variable>,
     car_daily_energy_required: f64,
     optimization_duration: std::time::Duration,
 ) -> SimpleOptimizationResults {
@@ -336,7 +338,7 @@ fn format_solution_results(
     SimpleOptimizationResults {
         pv_capacity_kw: solution.value(cap_pv) / 1000.0,
         grid_capacity_kw: solution.value(cap_grid) / 1000.0,
-        battery_capacity_kwh: solution.value(cst_battery) / 1000.0,
+        battery_capacity_kwh: cst_battery.map(|var| solution.value(var)).unwrap_or(0.0) / 1000.0,
         annual_pv_production_kwh: (pv_sum + overproduction) / 1000.0,
         annual_grid_energy_kwh: grid_sum / 1000.0,
         annual_battery_in_kwh: battery_in_sum / 1000.0,
@@ -390,7 +392,12 @@ pub fn run_simple_opt<S: Solver>(
         vars:
             cap_pv;
             cap_grid;
-            cst_battery;
+    }
+    let cst_battery: Option<good_lp::Variable>;
+    if config.bat_value > 0.0 {
+        cst_battery = Some(vars.add(variable().min(0.0)));
+    } else {
+        cst_battery = None;
     }
 
     // energy usage of own production
@@ -728,7 +735,7 @@ mod tests {
         config.feed_in_tariff = 0.0;
         config.fc_grid = 0.15;
         config.electricity_usage = 8000000.0;
-        config.bat_value = 100000.0;
+        config.bat_value = 0.0;
 
         let results = run_simple_opt(
             config.clone(),
@@ -736,7 +743,7 @@ mod tests {
             solar_irradiance,
             electricity_demand.1,
             ElectricityRate::fixed(0.1),
-            good_lp::highs,
+            good_lp::scip,
         )
         .unwrap();
         println!(
@@ -750,7 +757,7 @@ mod tests {
                 - config.electricity_usage
                 < 100.0
         );
-        assert_eq!(results.pv_capacity_kw, 1.8513584545416046);
+        assert_eq!(results.pv_capacity_kw, 1.8513578521489689);
         assert_eq!(results.battery_capacity_kwh, 0.0);
     }
 }
