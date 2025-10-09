@@ -38,11 +38,8 @@ pub fn calculate_optimized_roi(
     // Calculate annual savings for each year
     let annual_costs_no_solar = (0..num_years)
         .map(|index| {
-            let electricity_cost = simulation_results.config.fc_grid
-                * simulation_results.config.electricity_usage
-                / 1000.0
-                * (1.0 + simulation_results.config.electricity_price_increase).powf(index as f64);
-            electricity_cost
+            simulation_results.config.fc_grid * simulation_results.config.electricity_usage / 1000.0
+                * (1.0 + simulation_results.config.electricity_price_increase).powf(index as f64)
         })
         .collect::<Vec<f64>>();
 
@@ -64,8 +61,7 @@ pub fn calculate_optimized_roi(
     // Define the function to find the root of: f(ROI) = (sum / I_0)^{1/N} - 1 - ROI
     let equation_function = |roi: f64| -> f64 {
         let mut sum = 0.0;
-        for i in 0..num_years {
-            let savings_i = annual_savings[i];
+        for (i, savings_i) in annual_savings.iter().enumerate() {
             sum += (1.0 + roi).powf(i as f64) * savings_i;
         }
 
@@ -110,26 +106,24 @@ pub fn calculate_optimized_roi(
 
     if !found_root {
         // If binary search fails, try Newton's method as a fallback
-        roi_value = newton_method_root_finding(&equation_function, 0.1, tolerance, max_iterations);
+        roi_value = newton_method_root_finding(equation_function, 0.1, tolerance, max_iterations);
     }
 
     // Calculate actual NPV using the found ROI
     let mut npv = -initial_investment;
-    for i in 0..num_years {
-        let savings_i = annual_savings[i];
+    for (i, savings_i) in annual_savings.iter().enumerate() {
         npv += savings_i / (1.0 + roi_value).powf(i as f64);
     }
 
     // Calculate payback period
     let mut cumulative_savings = 0.0;
     let mut payback_period = None;
-    for i in 0..num_years {
-        cumulative_savings += annual_savings[i];
+    for (i, annual_saving) in annual_savings.iter().enumerate() {
+        cumulative_savings += annual_saving;
         if cumulative_savings >= initial_investment && payback_period.is_none() {
             payback_period = Some(
                 i as f64
-                    + (initial_investment - (cumulative_savings - annual_savings[i]))
-                        / annual_savings[i],
+                    + (initial_investment - (cumulative_savings - annual_saving)) / annual_saving,
             );
             break;
         }
@@ -170,7 +164,7 @@ where
             break; // Avoid division by zero
         }
 
-        x = x - fx / derivative;
+        x -= fx / derivative;
     }
 
     x
@@ -213,7 +207,7 @@ mod tests {
         simulation_results.pv_capacity_kw = 2.45;
         simulation_results.annual_grid_energy_kwh =
             simulation_results.config.electricity_usage * 0.57 / 1000.0;
-        
+
         let optimized_roi = calculate_optimized_roi(simulation_results, num_years, 120.0).unwrap();
 
         println!("Optimized ROI: {:?}", optimized_roi);
@@ -222,5 +216,28 @@ mod tests {
         assert!((optimized_roi.net_present_value - 496.03).abs() < 0.5);
         println!("Payback period: {:?}", optimized_roi.payback_period);
         assert!((optimized_roi.payback_period.unwrap() - 4.417).abs() < 0.02);
+    }
+
+    #[test]
+    fn test_real_financial_rentability_with_yearly() {
+        let mut simulation_results = SimpleOptimizationResults::default();
+        let num_years = 25;
+        simulation_results.config.inv_pv = 991.7355371900827;
+        simulation_results.config.electricity_price_increase = 0.0;
+        simulation_results.config.fc_grid = 0.15;
+        simulation_results.config.electricity_usage = 9000000.0;
+        simulation_results.battery_capacity_kwh = 0.0;
+        simulation_results.pv_capacity_kw = 0.9;
+        simulation_results.annual_grid_energy_kwh =
+            simulation_results.config.electricity_usage * (1.0 - 0.157) / 1000.0;
+
+        let optimized_roi = calculate_optimized_roi(simulation_results, num_years, 0.0).unwrap();
+
+        println!("Optimized ROI: {:?}", optimized_roi);
+        assert!((optimized_roi.roi - 0.236).abs() < 1e-3);
+        println!("Net present value: {:?}", optimized_roi.net_present_value);
+        assert!((optimized_roi.net_present_value - 210.89).abs() < 0.5);
+        println!("Payback period: {:?}", optimized_roi.payback_period);
+        assert!((optimized_roi.payback_period.unwrap() - 4.2).abs() < 0.02);
     }
 }

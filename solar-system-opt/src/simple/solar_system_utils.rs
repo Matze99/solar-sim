@@ -128,10 +128,11 @@ impl Default for OptimizationConfig {
     }
 }
 
+type DemandData = LazyLock<Mutex<Option<(Vec<f64>, Vec<f64>)>>>;
+
 // PERFORMANCE OPTIMIZATION: Cache loaded data to avoid repeated file I/O
 static SOLAR_DATA_CACHE: LazyLock<Mutex<Option<Vec<f64>>>> = LazyLock::new(|| Mutex::new(None));
-static DEMAND_DATA_CACHE: LazyLock<Mutex<Option<(Vec<f64>, Vec<f64>)>>> =
-    LazyLock::new(|| Mutex::new(None));
+static DEMAND_DATA_CACHE: DemandData = LazyLock::new(|| Mutex::new(None));
 static COP_DATA_CACHE: LazyLock<Mutex<Option<Vec<f64>>>> = LazyLock::new(|| Mutex::new(None));
 
 /// Load solar radiance time series from CSV file with caching
@@ -365,7 +366,6 @@ pub struct SimpleOptimizationResults {
     pub pv_capacity_kw: f64,
     pub grid_capacity_kw: f64,
     pub battery_capacity_kwh: f64,
-    pub heat_pump_capacity_kw: f64,
 
     // Annual totals
     pub annual_pv_production_kwh: f64,
@@ -376,8 +376,6 @@ pub struct SimpleOptimizationResults {
     pub annual_overproduction_kwh: f64,
     pub annual_electricity_demand_kwh: f64,
     pub required_car_energy_kwh: f64,
-    pub annual_heat_pump_energy_kwh: f64,
-    pub annual_heat_demand_kwh: f64,
 
     // Coverage metrics
     pub pv_coverage_percent: f64,
@@ -393,11 +391,12 @@ pub struct SimpleOptimizationResults {
     pub hourly_total_pv_production: Vec<f64>,
     pub hourly_total_electricity_demand: Vec<f64>,
     pub hourly_electricity_demand_base: Vec<f64>,
-    pub hourly_heat_pump_consumption: Vec<f64>,
-    pub hourly_heat_demand: Vec<f64>,
 
     // Configuration used
     pub config: OptimizationConfig,
+
+    // Timing information
+    pub optimization_duration_ms: u128,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -549,7 +548,6 @@ pub fn calculate_heat_demand_with_insulation(
     let heat_demand_column = match building_type {
         BuildingTypeEnum::SingleFamily | BuildingTypeEnum::Terraced => "SFH",
         BuildingTypeEnum::MultiFamily | BuildingTypeEnum::Apartment => "MFH",
-        _ => return Err("Invalid building type".into()),
     };
 
     let hourly_profile = load_heat_demand_profile_from_csv(heat_demand_column)?;

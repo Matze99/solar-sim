@@ -29,16 +29,12 @@ pub enum BuildingTypeEnum {
     Apartment,
 }
 
+#[derive(Default)]
 pub struct BuildingTypeMapping {
     pub mapping: HashMap<BuildingTypeEnum, HeatingNeed>,
 }
 
 impl BuildingTypeMapping {
-    pub fn new() -> Self {
-        let mapping = HashMap::new();
-        Self { mapping }
-    }
-
     pub fn get(&self, building_type: BuildingTypeEnum) -> Option<&HeatingNeed> {
         self.mapping.get(&building_type)
     }
@@ -86,7 +82,7 @@ impl Default for YearCategoryESMapping {
         let mut mapping = HashMap::new();
 
         // Before1900
-        let mut before1900 = BuildingTypeMapping::new();
+        let mut before1900 = BuildingTypeMapping::default();
         before1900.insert(
             BuildingTypeEnum::SingleFamily,
             HeatingNeed::new(10.6, 10.7, 11.0),
@@ -100,7 +96,7 @@ impl Default for YearCategoryESMapping {
         mapping.insert(YearCategoryESEnum::Before1900, before1900);
 
         // Between1901and1936
-        let mut between1901and1936 = BuildingTypeMapping::new();
+        let mut between1901and1936 = BuildingTypeMapping::default();
         between1901and1936.insert(
             BuildingTypeEnum::SingleFamily,
             HeatingNeed::new(14.8, 8.0, 7.1),
@@ -117,7 +113,7 @@ impl Default for YearCategoryESMapping {
         mapping.insert(YearCategoryESEnum::Between1901and1936, between1901and1936);
 
         // Between1937and1959
-        let mut between1937and1959 = BuildingTypeMapping::new();
+        let mut between1937and1959 = BuildingTypeMapping::default();
         between1937and1959.insert(
             BuildingTypeEnum::SingleFamily,
             HeatingNeed::new(8.1, 4.1, 3.4),
@@ -134,7 +130,7 @@ impl Default for YearCategoryESMapping {
         mapping.insert(YearCategoryESEnum::Between1937and1959, between1937and1959);
 
         // Between1960and1979
-        let mut between1960and1979 = BuildingTypeMapping::new();
+        let mut between1960and1979 = BuildingTypeMapping::default();
         between1960and1979.insert(
             BuildingTypeEnum::SingleFamily,
             HeatingNeed::new(12.4, 10.2, 9.1),
@@ -148,7 +144,7 @@ impl Default for YearCategoryESMapping {
         mapping.insert(YearCategoryESEnum::Between1960and1979, between1960and1979);
 
         // Between1980and2006
-        let mut between1980and2006 = BuildingTypeMapping::new();
+        let mut between1980and2006 = BuildingTypeMapping::default();
         between1980and2006.insert(
             BuildingTypeEnum::SingleFamily,
             HeatingNeed::new(5.8, 4.7, 5.7),
@@ -162,7 +158,7 @@ impl Default for YearCategoryESMapping {
         mapping.insert(YearCategoryESEnum::Between1980and2006, between1980and2006);
 
         // After2007
-        let mut after2007 = BuildingTypeMapping::new();
+        let mut after2007 = BuildingTypeMapping::default();
         after2007.insert(
             BuildingTypeEnum::SingleFamily,
             HeatingNeed::new(6.4, 2.9, 2.4),

@@ -1,7 +1,7 @@
 use plotters::prelude::*;
 use std::collections::HashMap;
 
-use crate::simple::solar_system_utils::{OptimizationConfig, OptimizationResults};
+use crate::simple::solar_system_utils::OptimizationResults;
 
 // Equivalent to plot_data1 function
 pub fn plot_data1(
@@ -37,15 +37,13 @@ pub fn plot_data1(
             &RED,
         ))?
         .label("Data")
-        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 10, y)], &RED));
+        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 10, y)], RED));
 
     chart.draw_series(PointSeries::of_element(
         data.iter().enumerate().map(|(i, &y)| (i as f64, y)),
         5,
         &RED,
-        &|c, s, st| {
-            return EmptyElement::at(c) + Circle::new((0, 0), s, st.filled());
-        },
+        &|c, s, st| EmptyElement::at(c) + Circle::new((0, 0), s, st.filled()),
     ))?;
 
     chart.configure_series_labels().draw()?;
@@ -70,7 +68,7 @@ pub fn plot_data2(
     let lower = &areas[1];
 
     // First subplot: demand comparison
-    let mut chart1 = ChartBuilder::on(&upper)
+    let mut chart1 = ChartBuilder::on(upper)
         .caption("Demand Comparison", ("sans-serif", 30))
         .margin(20)
         .x_label_area_size(40)
@@ -94,19 +92,19 @@ pub fn plot_data2(
             Rectangle::new([(i as f64 - 0.2, 0.0), (i as f64 + 0.2, y)], BLUE.filled())
         }))?
         .label("dem_elec")
-        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 10, y)], &BLUE));
+        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 10, y)], BLUE));
 
     chart1
         .draw_series(dem_charge.iter().enumerate().map(|(i, &y)| {
             Rectangle::new([(i as f64 + 0.2, 0.0), (i as f64 + 0.6, y)], GREEN.filled())
         }))?
         .label("dem_charge")
-        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 10, y)], &GREEN));
+        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 10, y)], GREEN));
 
     chart1.configure_series_labels().draw()?;
 
     // Second subplot: supply comparison
-    let mut chart2 = ChartBuilder::on(&lower)
+    let mut chart2 = ChartBuilder::on(lower)
         .caption("Supply Comparison", ("sans-serif", 30))
         .margin(20)
         .x_label_area_size(40)
@@ -130,7 +128,7 @@ pub fn plot_data2(
             Rectangle::new([(i as f64 - 0.2, 0.0), (i as f64 + 0.2, y)], RED.filled())
         }))?
         .label("GRID")
-        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 10, y)], &RED));
+        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 10, y)], RED));
 
     chart2
         .draw_series(sup_pv.iter().enumerate().map(|(i, &y)| {
@@ -140,7 +138,7 @@ pub fn plot_data2(
             )
         }))?
         .label("PV")
-        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 10, y)], &MAGENTA));
+        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 10, y)], MAGENTA));
 
     chart2.configure_series_labels().draw()?;
 
@@ -164,7 +162,7 @@ pub fn plot_result1(
     let lower = &areas[2];
 
     // Plot 1: PV and GRID production
-    let mut chart1 = ChartBuilder::on(&upper)
+    let mut chart1 = ChartBuilder::on(upper)
         .caption("Energy vs PV-Capacity", ("sans-serif", 25))
         .margin(15)
         .x_label_area_size(40)
@@ -196,7 +194,7 @@ pub fn plot_result1(
             &BLUE,
         ))?
         .label("PV_PROD")
-        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 10, y)], &BLUE));
+        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 10, y)], BLUE));
 
     chart1
         .draw_series(LineSeries::new(
@@ -207,12 +205,12 @@ pub fn plot_result1(
             &RED,
         ))?
         .label("GRID_PROD")
-        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 10, y)], &RED));
+        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 10, y)], RED));
 
     chart1.configure_series_labels().draw()?;
 
     // Plot 2: Overproduction
-    let mut chart2 = ChartBuilder::on(&middle)
+    let mut chart2 = ChartBuilder::on(middle)
         .caption("Overproduction vs PV-Capacity", ("sans-serif", 25))
         .margin(15)
         .x_label_area_size(40)
@@ -237,12 +235,12 @@ pub fn plot_result1(
             &RGBColor(255, 165, 0), // Orange
         ))?
         .label("OverProd")
-        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 10, y)], &RGBColor(255, 165, 0)));
+        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 10, y)], RGBColor(255, 165, 0)));
 
     chart2.configure_series_labels().draw()?;
 
     // Plot 3: Cost
-    let mut chart3 = ChartBuilder::on(&lower)
+    let mut chart3 = ChartBuilder::on(lower)
         .caption("Cost vs PV-Capacity", ("sans-serif", 25))
         .margin(15)
         .x_label_area_size(40)
@@ -272,7 +270,7 @@ pub fn plot_result1(
             &GREEN,
         ))?
         .label("ObRes")
-        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 10, y)], &GREEN));
+        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 10, y)], GREEN));
 
     chart3.configure_series_labels().draw()?;
 
@@ -314,8 +312,7 @@ pub fn generate_optimization_plots(
 
     // Plot 2: Compare demand vs supply for first 24 hours
     let daily_hours = 24.min(results.pv_energy.len());
-    let electricity_demand = vec![2.0; daily_hours]; // Same as in simulation
-    let hot_water_demand = vec![1.0; daily_hours]; // Same as in simulation
+    let electricity_demand = vec![2.0; daily_hours];
 
     plot_data2(
         &electricity_demand,
@@ -429,11 +426,19 @@ pub fn plot_hourly_averages_with_title(
     // Determine if this is single day data or full year data
     let (hourly_demand, hourly_pv, hourly_grid, hourly_battery, title) = if data_len == 24 {
         // Single day data - use as is
+        let mut demand_array = [0.0; 24];
+        let mut pv_array = [0.0; 24];
+        let mut grid_array = [0.0; 24];
+        let mut battery_array = [0.0; 24];
+        demand_array.copy_from_slice(electricity_demand);
+        pv_array.copy_from_slice(pv_production);
+        grid_array.copy_from_slice(grid_consumption);
+        battery_array.copy_from_slice(battery_storage);
         (
-            electricity_demand.to_vec(),
-            pv_production.to_vec(),
-            grid_consumption.to_vec(),
-            battery_storage.to_vec(),
+            demand_array,
+            pv_array,
+            grid_array,
+            battery_array,
             custom_title
                 .unwrap_or("Single Day Energy Profile")
                 .to_string(),
@@ -441,11 +446,11 @@ pub fn plot_hourly_averages_with_title(
     } else {
         // Full year or partial year data - calculate hourly averages
         const NUM_HOURS: usize = 8760;
-        let mut hourly_demand = vec![0.0; 24];
-        let mut hourly_pv = vec![0.0; 24];
-        let mut hourly_grid = vec![0.0; 24];
-        let mut hourly_battery = vec![0.0; 24];
-        let mut hour_counts = vec![0; 24];
+        let mut hourly_demand = [0.0; 24];
+        let mut hourly_pv = [0.0; 24];
+        let mut hourly_grid = [0.0; 24];
+        let mut hourly_battery = [0.0; 24];
+        let mut hour_counts = [0; 24];
 
         // Sum values for each hour of the day
         for hour in 0..NUM_HOURS.min(data_len) {
@@ -583,8 +588,8 @@ pub fn plot_hourly_averages_with_title(
 
     chart
         .configure_series_labels()
-        .background_style(&WHITE.mix(0.8))
-        .border_style(&BLACK)
+        .background_style(WHITE.mix(0.8))
+        .border_style(BLACK)
         .draw()?;
 
     root.present()?;
