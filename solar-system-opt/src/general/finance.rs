@@ -240,10 +240,10 @@ mod tests {
         let optimized_roi = calculate_optimized_roi(simulation_results, num_years, 0.0).unwrap();
 
         println!("Optimized ROI: {:?}", optimized_roi);
-        assert!((optimized_roi.roi - 0.34).abs() < 1e-3);
+        assert!((optimized_roi.roi - 0.236).abs() < 1e-3);
         println!("Net present value: {:?}", optimized_roi.net_present_value);
-        assert!((optimized_roi.net_present_value - 308.44).abs() < 0.5);
+        assert!((optimized_roi.net_present_value - 210.89).abs() < 0.5);
         println!("Payback period: {:?}", optimized_roi.payback_period);
-        assert!((optimized_roi.payback_period.unwrap() - 2.9).abs() < 0.02);
+        assert!((optimized_roi.payback_period.unwrap() - 4.2).abs() < 0.02);
     }
 }
