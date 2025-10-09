@@ -128,10 +128,11 @@ impl Default for OptimizationConfig {
     }
 }
 
+type DemandData = LazyLock<Mutex<Option<(Vec<f64>, Vec<f64>)>>>;
+
 // PERFORMANCE OPTIMIZATION: Cache loaded data to avoid repeated file I/O
 static SOLAR_DATA_CACHE: LazyLock<Mutex<Option<Vec<f64>>>> = LazyLock::new(|| Mutex::new(None));
-static DEMAND_DATA_CACHE: LazyLock<Mutex<Option<(Vec<f64>, Vec<f64>)>>> =
-    LazyLock::new(|| Mutex::new(None));
+static DEMAND_DATA_CACHE: DemandData = LazyLock::new(|| Mutex::new(None));
 static COP_DATA_CACHE: LazyLock<Mutex<Option<Vec<f64>>>> = LazyLock::new(|| Mutex::new(None));
 
 /// Load solar radiance time series from CSV file with caching

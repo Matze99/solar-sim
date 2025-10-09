@@ -11,6 +11,19 @@ use crate::simple::solar_system_utils::{
 
 const NUM_HOURS: usize = 8760;
 
+struct OptimizationVariables<'a> {
+    e_pv: &'a [good_lp::Variable],
+    e_grid: &'a [good_lp::Variable],
+    e_o: &'a [good_lp::Variable],
+    est_battery: &'a Option<Vec<good_lp::Variable>>,
+    est_in_battery: &'a Option<Vec<good_lp::Variable>>,
+    est_out_battery: &'a Option<Vec<good_lp::Variable>>,
+    e_car_charge: &'a [good_lp::Variable],
+    cap_pv: good_lp::Variable,
+    cap_grid: good_lp::Variable,
+    cst_battery: Option<good_lp::Variable>,
+}
+
 /// Helper function to convert day number to a readable date string
 fn get_date_string(day: usize) -> String {
     let months = [
@@ -55,12 +68,12 @@ pub fn get_scaled_electricity_demand(
 
 fn generate_objective(
     config: &OptimizationConfig,
-    e_grid: &Vec<good_lp::Variable>,
+    e_grid: &[good_lp::Variable],
     cap_pv: good_lp::Variable,
     cap_grid: good_lp::Variable,
     cst_battery: Option<good_lp::Variable>,
-    electricity_rate_hourly: &Vec<f64>,
-    e_o: &Vec<good_lp::Variable>,
+    electricity_rate_hourly: &[f64],
+    e_o: &[good_lp::Variable],
 ) -> (
     Expression,
     good_lp::Variable,
@@ -72,8 +85,8 @@ fn generate_objective(
 
     if config.optimize_for_autonomy {
         // Optimize for maximum autonomy: minimize grid consumption
-        for t in 0..NUM_HOURS {
-            objective += e_grid[t] / 1000.0; // Minimize grid consumption
+        for e_grid_item in e_grid.iter().take(NUM_HOURS) {
+            objective += *e_grid_item / 1000.0; // Minimize grid consumption
         }
     }
     // Optimize for minimum cost: include investment costs and operating costs
@@ -94,6 +107,7 @@ fn generate_objective(
 }
 
 /// Adds all fixed constraints that are not time dependent
+#[allow(clippy::too_many_arguments)]
 fn add_fixed_constraints<M>(
     mut model: M,
     config: &OptimizationConfig,
@@ -144,21 +158,13 @@ where
 }
 
 /// Generates time-dependent constraints for the optimization model
+#[allow(clippy::too_many_arguments)]
 fn add_time_dependent_constraints<M>(
     mut model: M,
     config: &OptimizationConfig,
     solar_irradiance: &[f64],
     scaled_electricity_demand: &[f64],
-    e_pv: &[good_lp::Variable],
-    e_grid: &[good_lp::Variable],
-    e_o: &[good_lp::Variable],
-    est_battery: &Option<Vec<good_lp::Variable>>,
-    est_in_battery: &Option<Vec<good_lp::Variable>>,
-    est_out_battery: &Option<Vec<good_lp::Variable>>,
-    e_car_charge: &[good_lp::Variable],
-    cap_pv: good_lp::Variable,
-    cap_grid: good_lp::Variable,
-    cst_battery: Option<good_lp::Variable>,
+    vars: &OptimizationVariables,
     storage_retention_bat: f64,
     eta_in_bat: f64,
     eta_out_bat_inv: f64,
@@ -171,44 +177,46 @@ where
         let elec_demand_t = scaled_electricity_demand[t];
 
         // Energy balance: PV + Grid + Battery Out = Demand + Battery In + Car Charging + Heat Pump
-        if let (Some(battery_in), Some(battery_out)) = (est_in_battery, est_out_battery) {
+        if let (Some(battery_in), Some(battery_out)) = (vars.est_in_battery, vars.est_out_battery) {
             model = model.with(constraint!(
-                e_pv[t] + e_grid[t] - elec_demand_t - battery_in[t] + battery_out[t]
-                    - e_car_charge[t]
+                vars.e_pv[t] + vars.e_grid[t] - elec_demand_t - battery_in[t] + battery_out[t]
+                    - vars.e_car_charge[t]
                     == 0.0
             ));
         } else {
             // No battery: PV + Grid = Demand + Car Charging
             model = model.with(constraint!(
-                e_pv[t] + e_grid[t] - elec_demand_t - e_car_charge[t] == 0.0
+                vars.e_pv[t] + vars.e_grid[t] - elec_demand_t - vars.e_car_charge[t] == 0.0
             ));
         }
 
         // Overproduction constraint: overproduction = potential PV - actual PV
-        model = model.with(constraint!(e_o[t] - cap_pv * solar_t + e_pv[t] == 0.0));
+        model = model.with(constraint!(
+            vars.e_o[t] - vars.cap_pv * solar_t + vars.e_pv[t] == 0.0
+        ));
 
         // PV capacity limit: actual PV <= potential PV
-        model = model.with(constraint!(cap_pv * solar_t - e_pv[t] >= 0.0));
+        model = model.with(constraint!(vars.cap_pv * solar_t - vars.e_pv[t] >= 0.0));
 
         // Grid capacity limit
-        model = model.with(constraint!(cap_grid - e_grid[t] >= 0.0));
+        model = model.with(constraint!(vars.cap_grid - vars.e_grid[t] >= 0.0));
 
         // Battery constraints
         if config.bat_value > 0.0 {
             if let (Some(battery_storage), Some(battery_in), Some(battery_out)) =
-                (est_battery, est_in_battery, est_out_battery)
+                (vars.est_battery, vars.est_in_battery, vars.est_out_battery)
             {
                 // Battery capacity limit
                 model = model.with(constraint!(
-                    cst_battery.unwrap() - battery_storage[t] >= 0.0
+                    vars.cst_battery.unwrap() - battery_storage[t] >= 0.0
                 ));
 
                 // C-rate constraints
                 model = model.with(constraint!(
-                    config.c_rate_limit * cst_battery.unwrap() - battery_in[t] >= 0.0
+                    config.c_rate_limit * vars.cst_battery.unwrap() - battery_in[t] >= 0.0
                 ));
                 model = model.with(constraint!(
-                    config.c_rate_limit * cst_battery.unwrap() - battery_out[t] >= 0.0
+                    config.c_rate_limit * vars.cst_battery.unwrap() - battery_out[t] >= 0.0
                 ));
 
                 // Storage balance constraints (t >= 1)
@@ -228,7 +236,7 @@ where
         if config.electric_car_enabled {
             // Determine if this is a charging hour (simplified: day = 6-18, night = 18-6)
             let hour_of_day = t % 24;
-            let is_day_hour = hour_of_day >= 6 && hour_of_day < 18;
+            let is_day_hour = (6..18).contains(&hour_of_day);
             let can_charge = if config.car_charge_during_day {
                 is_day_hour
             } else {
@@ -237,11 +245,11 @@ where
 
             // If car cannot charge during this hour, set charging to zero
             if !can_charge {
-                model = model.with(constraint!(e_car_charge[t] == 0.0));
+                model = model.with(constraint!(vars.e_car_charge[t] == 0.0));
             }
         } else {
             // If electric car is disabled, set all charging to zero
-            model = model.with(constraint!(e_car_charge[t] == 0.0));
+            model = model.with(constraint!(vars.e_car_charge[t] == 0.0));
         }
     }
 
@@ -252,42 +260,37 @@ where
 fn format_solution_results(
     solution: &dyn good_lp::Solution,
     config: &OptimizationConfig,
-    e_pv: &[good_lp::Variable],
-    e_grid: &[good_lp::Variable],
-    e_o: &[good_lp::Variable],
-    est_battery: &Option<Vec<good_lp::Variable>>,
-    est_in_battery: &Option<Vec<good_lp::Variable>>,
-    est_out_battery: &Option<Vec<good_lp::Variable>>,
-    e_car_charge: &[good_lp::Variable],
+    vars: &OptimizationVariables,
     scaled_electricity_demand: &[f64],
-    cap_pv: good_lp::Variable,
-    cap_grid: good_lp::Variable,
-    cst_battery: Option<good_lp::Variable>,
     car_daily_energy_required: f64,
     optimization_duration: std::time::Duration,
 ) -> SimpleOptimizationResults {
     // Calculate and print results
-    let pv_sum: f64 = e_pv.iter().map(|&var| solution.value(var)).sum();
-    let grid_sum: f64 = e_grid.iter().map(|&var| solution.value(var)).sum();
-    let overproduction: f64 = e_o.iter().map(|&var| solution.value(var)).sum();
+    let pv_sum: f64 = vars.e_pv.iter().map(|&var| solution.value(var)).sum();
+    let grid_sum: f64 = vars.e_grid.iter().map(|&var| solution.value(var)).sum();
+    let overproduction: f64 = vars.e_o.iter().map(|&var| solution.value(var)).sum();
     let total_demand: f64 = scaled_electricity_demand.iter().sum();
-    let battery_in_sum: f64 = if let Some(battery_in) = est_in_battery {
+    let battery_in_sum: f64 = if let Some(battery_in) = vars.est_in_battery {
         battery_in.iter().map(|&var| solution.value(var)).sum()
     } else {
         0.0
     };
-    let battery_out_sum: f64 = if let Some(battery_out) = est_out_battery {
+    let battery_out_sum: f64 = if let Some(battery_out) = vars.est_out_battery {
         battery_out.iter().map(|&var| solution.value(var)).sum()
     } else {
         0.0
     };
-    let car_charging_sum: f64 = e_car_charge.iter().map(|&var| solution.value(var)).sum();
+    let car_charging_sum: f64 = vars
+        .e_car_charge
+        .iter()
+        .map(|&var| solution.value(var))
+        .sum();
 
     // Collect hourly data for struct
-    let pv_production: Vec<f64> = e_pv.iter().map(|&var| solution.value(var)).collect();
-    let overproduction_hourly: Vec<f64> = e_o.iter().map(|&var| solution.value(var)).collect();
-    let grid_consumption: Vec<f64> = e_grid.iter().map(|&var| solution.value(var)).collect();
-    let battery_storage: Vec<f64> = if let Some(battery_storage_vars) = est_battery {
+    let pv_production: Vec<f64> = vars.e_pv.iter().map(|&var| solution.value(var)).collect();
+    let overproduction_hourly: Vec<f64> = vars.e_o.iter().map(|&var| solution.value(var)).collect();
+    let grid_consumption: Vec<f64> = vars.e_grid.iter().map(|&var| solution.value(var)).collect();
+    let battery_storage: Vec<f64> = if let Some(battery_storage_vars) = vars.est_battery {
         battery_storage_vars
             .iter()
             .map(|&var| solution.value(var))
@@ -295,7 +298,8 @@ fn format_solution_results(
     } else {
         vec![0.0; NUM_HOURS]
     };
-    let car_charging_hourly: Vec<f64> = e_car_charge
+    let car_charging_hourly: Vec<f64> = vars
+        .e_car_charge
         .iter()
         .map(|&var| solution.value(var))
         .collect();
@@ -336,9 +340,13 @@ fn format_solution_results(
     };
 
     SimpleOptimizationResults {
-        pv_capacity_kw: solution.value(cap_pv) / 1000.0,
-        grid_capacity_kw: solution.value(cap_grid) / 1000.0,
-        battery_capacity_kwh: cst_battery.map(|var| solution.value(var)).unwrap_or(0.0) / 1000.0,
+        pv_capacity_kw: solution.value(vars.cap_pv) / 1000.0,
+        grid_capacity_kw: solution.value(vars.cap_grid) / 1000.0,
+        battery_capacity_kwh: vars
+            .cst_battery
+            .map(|var| solution.value(var))
+            .unwrap_or(0.0)
+            / 1000.0,
         annual_pv_production_kwh: (pv_sum + overproduction) / 1000.0,
         annual_grid_energy_kwh: grid_sum / 1000.0,
         annual_battery_in_kwh: battery_in_sum / 1000.0,
@@ -378,7 +386,7 @@ pub fn run_simple_opt<S: Solver>(
     // Use monthly demand to generate scaled load curve if available, otherwise use provided electricity_demand
     let scaled_electricity_demand = get_scaled_electricity_demand(
         config.monthly_demand.clone(),
-        config.electricity_usage.clone(),
+        config.electricity_usage,
         electricity_demand,
     )?;
 
@@ -393,12 +401,11 @@ pub fn run_simple_opt<S: Solver>(
             cap_pv;
             cap_grid;
     }
-    let cst_battery: Option<good_lp::Variable>;
-    if config.bat_value > 0.0 {
-        cst_battery = Some(vars.add(variable().min(0.0)));
+    let cst_battery: Option<good_lp::Variable> = if config.bat_value > 0.0 {
+        Some(vars.add(variable().min(0.0)))
     } else {
-        cst_battery = None;
-    }
+        None
+    };
 
     // energy usage of own production
     let mut e_pv: Vec<good_lp::Variable> = Vec::with_capacity(NUM_HOURS);
@@ -483,22 +490,27 @@ pub fn run_simple_opt<S: Solver>(
         car_daily_energy_required,
     );
 
+    // Create optimization variables struct
+    let opt_vars = OptimizationVariables {
+        e_pv: &e_pv,
+        e_grid: &e_grid,
+        e_o: &e_o,
+        est_battery: &est_battery,
+        est_in_battery: &est_in_battery,
+        est_out_battery: &est_out_battery,
+        e_car_charge: &e_car_charge,
+        cap_pv,
+        cap_grid,
+        cst_battery,
+    };
+
     // Add time-dependent constraints
     model = add_time_dependent_constraints(
         model,
         &config,
         &solar_irradiance,
         &scaled_electricity_demand,
-        &e_pv,
-        &e_grid,
-        &e_o,
-        &est_battery,
-        &est_in_battery,
-        &est_out_battery,
-        &e_car_charge,
-        cap_pv,
-        cap_grid,
-        cst_battery,
+        &opt_vars,
         storage_retention_bat,
         eta_in_bat,
         eta_out_bat_inv,
@@ -514,17 +526,8 @@ pub fn run_simple_opt<S: Solver>(
         Ok(solution) => Ok(format_solution_results(
             &solution,
             &config,
-            &e_pv,
-            &e_grid,
-            &e_o,
-            &est_battery,
-            &est_in_battery,
-            &est_out_battery,
-            &e_car_charge,
+            &opt_vars,
             &scaled_electricity_demand,
-            cap_pv,
-            cap_grid,
-            cst_battery,
             car_daily_energy_required,
             optimization_duration,
         )),

@@ -148,10 +148,10 @@ impl ElectricityRate {
 
         for tier in tiers {
             for hour_range in &tier.hour_ranges {
-                if hour_range.weekday_type == WeekdayType::Weekday {
-                    if !self.mark_hours_covered(&mut covered_hours, hour_range) {
-                        return false; // Overlapping hours detected
-                    }
+                if hour_range.weekday_type == WeekdayType::Weekday
+                    && !self.mark_hours_covered(&mut covered_hours, hour_range)
+                {
+                    return false; // Overlapping hours detected
                 }
             }
         }
@@ -166,10 +166,10 @@ impl ElectricityRate {
 
         for tier in tiers {
             for hour_range in &tier.hour_ranges {
-                if hour_range.weekday_type == WeekdayType::Weekend {
-                    if !self.mark_hours_covered(&mut covered_hours, hour_range) {
-                        return false; // Overlapping hours detected
-                    }
+                if hour_range.weekday_type == WeekdayType::Weekend
+                    && !self.mark_hours_covered(&mut covered_hours, hour_range)
+                {
+                    return false; // Overlapping hours detected
                 }
             }
         }

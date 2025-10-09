@@ -59,19 +59,13 @@ pub enum WeekDay {
 }
 
 /// Simple weekly schedule
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema, TS, Default)]
 #[ts(export, export_to = "./worker.ts")]
 pub struct Schedule {
     pub weekly_shifts: HashMap<WeekDay, WorkShift>,
 }
 
 impl Schedule {
-    pub fn new() -> Self {
-        Schedule {
-            weekly_shifts: HashMap::new(),
-        }
-    }
-
     pub fn add_shift(&mut self, day: WeekDay, shift: WorkShift) {
         self.weekly_shifts.insert(day, shift);
     }
