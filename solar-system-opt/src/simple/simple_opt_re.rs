@@ -203,6 +203,7 @@ where
         model = model.with(constraint!(vars.cap_grid - vars.e_grid[t] >= 0.0));
 
         // Battery constraints
+        #[allow(clippy::collapsible_if)]
         if config.bat_value > 0.0 {
             if let (Some(battery_storage), Some(battery_in), Some(battery_out)) =
                 (vars.est_battery, vars.est_in_battery, vars.est_out_battery)
@@ -617,6 +618,7 @@ pub fn run_simple_opt_with_output(
     }
 
     // Plot individual days if requested
+    #[allow(clippy::collapsible_if)]
     if let Some(days) = days_to_plot {
         if !days.is_empty() {
             // Create results directory for individual day plots
