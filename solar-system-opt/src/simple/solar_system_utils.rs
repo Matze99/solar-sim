@@ -9,6 +9,40 @@ use ems_model::building::insulation::{
 
 use crate::general::electricity_demand::MonthlyDemand;
 
+#[derive(Debug, Clone)]
+pub struct StaticSimulationConfigs {
+    pub pv_degradation: f64,
+    pub battery_degradation: f64,
+    pub num_years: usize,
+    pub battery_loss: f64,
+    pub max_battery_charge_rate: f64,
+    pub max_battery_discharge_rate: f64,
+}
+
+impl Default for StaticSimulationConfigs {
+    fn default() -> Self {
+        Self {
+            pv_degradation: 0.005,
+            battery_degradation: 0.03,
+            num_years: 25,
+            battery_loss: 0.00005,
+            max_battery_charge_rate: 2000.0,
+            max_battery_discharge_rate: 2000.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct StaticSimulationResults {
+    pub autarky: f64,
+    pub total_production: f64,
+    pub total_direct_consumption: f64,
+    pub total_battery_out: f64,
+    pub total_battery_in: f64,
+    pub total_overproduction: f64,
+    pub total_overproduction_without_battery: f64,
+}
+
 /// Configuration struct holding all optimization parameters
 #[derive(Debug, Clone)]
 pub struct OptimizationConfig {
