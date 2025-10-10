@@ -6,7 +6,8 @@ use crate::general::electricity_demand::{MonthlyDemand, create_scaled_load_curve
 use crate::simple::plot::{plot_hourly_averages, plot_hourly_averages_with_title};
 use crate::simple::solar_system_utils::{
     HeatingType, InsulationLevel, OptimizationConfig, SimpleOptimizationResults,
-    load_demand_from_csv, load_solar_radiance_from_csv,
+    StaticSimulationConfigs, StaticSimulationResults, load_demand_from_csv,
+    load_solar_radiance_from_csv,
 };
 
 const NUM_HOURS: usize = 8760;
@@ -202,6 +203,7 @@ where
         model = model.with(constraint!(vars.cap_grid - vars.e_grid[t] >= 0.0));
 
         // Battery constraints
+        #[allow(clippy::collapsible_if)]
         if config.bat_value > 0.0 {
             if let (Some(battery_storage), Some(battery_in), Some(battery_out)) =
                 (vars.est_battery, vars.est_in_battery, vars.est_out_battery)
@@ -616,6 +618,7 @@ pub fn run_simple_opt_with_output(
     }
 
     // Plot individual days if requested
+    #[allow(clippy::collapsible_if)]
     if let Some(days) = days_to_plot {
         if !days.is_empty() {
             // Create results directory for individual day plots
@@ -726,6 +729,187 @@ pub fn run_simple_opt_with_day_plots(
     Ok(())
 }
 
+/// Runs a static simulation of a solar PV system with battery storage over multiple years.
+///
+/// This function simulates the energy flow of a solar PV system with optional battery storage,
+/// accounting for system degradation over time. It calculates key performance metrics including
+/// autarky (self-sufficiency), production, consumption, and overproduction.
+///
+/// # Arguments
+///
+/// * `pv_cap` - Solar PV capacity in watts (W). This is the nominal power output of the PV system.
+/// * `bat_cap` - Battery capacity in watt-hours (Wh). Set to 0.0 for systems without battery storage.
+/// * `solar_irradiance` - Vector of hourly solar irradiance values (normalized, typically 0.0-1.0) for 8760 hours (one year).
+/// * `electricity_demand` - Vector of hourly electricity demand values in watt-hours (Wh) for 8760 hours.
+/// * `configs` - Configuration struct containing simulation parameters including:
+///   - `num_years`: Number of years to simulate
+///   - `battery_loss`: Hourly battery self-discharge rate (e.g., 0.99 for 1% loss)
+///   - `battery_degradation`: Annual battery capacity degradation rate (e.g., 0.02 for 2% per year)
+///   - `pv_degradation`: Annual PV output degradation rate (e.g., 0.005 for 0.5% per year)
+///   - `max_battery_charge_rate`: Maximum battery charging power in watts
+///   - `max_battery_discharge_rate`: Maximum battery discharging power in watts
+///
+/// # Returns
+///
+/// Returns a `Result` containing `StaticSimulationResults` with the following aggregated metrics over all simulated years:
+/// * `autarky` - Self-sufficiency ratio (0.0-1.0): fraction of demand met by own production
+/// * `total_production` - Total PV energy produced across all years (Wh)
+/// * `total_direct_consumption` - Total energy consumed directly from PV (Wh)
+/// * `total_battery_out` - Total energy discharged from battery (Wh)
+/// * `total_battery_in` - Total energy charged into battery (Wh)
+/// * `total_overproduction` - Total excess energy that couldn't be used or stored (Wh)
+/// * `total_overproduction_without_battery` - Hypothetical overproduction if battery didn't exist (Wh)
+///
+/// # Battery Operation Logic
+///
+/// The simulation implements a simple battery control strategy for each hour:
+/// 1. If production exceeds demand (over_production > 0) and battery is not full:
+///    - Charge battery with excess energy (limited by charge rate and remaining capacity)
+/// 2. If production is less than demand (over_production < 0) and battery has charge:
+///    - Discharge battery to meet demand (limited by discharge rate and available energy)
+/// 3. Battery self-discharge is applied each hour based on `battery_loss` parameter
+///
+/// # Degradation Modeling
+///
+/// * **PV Degradation**: Applied annually to the solar production vector
+/// * **Battery Degradation**: Applied annually to the battery capacity
+///
+/// # Example
+///
+/// ```rust
+/// use solar_system_opt::simple::simple_opt_re::run_static_simulation;
+/// use solar_system_opt::simple::solar_system_utils::{StaticSimulationConfigs, load_solar_radiance_from_csv, load_demand_from_csv};
+///
+/// let solar_irradiance = load_solar_radiance_from_csv();
+/// let (_hot_water, electricity_demand) = load_demand_from_csv();
+///
+/// let configs = StaticSimulationConfigs {
+///     num_years: 25,
+///     battery_loss: 0.99,
+///     battery_degradation: 0.02,
+///     pv_degradation: 0.005,
+///     max_battery_charge_rate: 5000.0,
+///     max_battery_discharge_rate: 5000.0,
+/// };
+///
+/// let results = run_static_simulation(
+///     10000.0,  // 10 kW PV capacity
+///     13500.0,  // 13.5 kWh battery
+///     solar_irradiance,
+///     electricity_demand,
+///     configs,
+/// ).unwrap();
+///
+/// println!("System autarky: {:.1}%", results.autarky * 100.0);
+/// ```
+///
+/// # Notes
+///
+/// * The simulation assumes 8760 hours per year (NUM_HOURS constant)
+/// * All energy values are in watt-hours (Wh) or watts (W) for consistency
+/// * Battery efficiency losses during charging/discharging are simplified (included in `battery_loss`)
+/// * The first hour of each year has simplified battery initialization logic
+pub fn run_static_simulation(
+    pv_cap: f64,
+    mut bat_cap: f64,
+    solar_irradiance: Vec<f64>,
+    electricity_demand: Vec<f64>,
+    configs: StaticSimulationConfigs,
+) -> Result<StaticSimulationResults, Box<dyn std::error::Error>> {
+    let mut solar_production = solar_irradiance
+        .iter()
+        .map(|&x| x * pv_cap)
+        .collect::<Vec<f64>>();
+
+    let mut total_direct_consumption = vec![0.0; configs.num_years];
+    let mut total_over_production = vec![0.0; configs.num_years];
+    let mut total_battery_out = vec![0.0; configs.num_years];
+    let mut total_battery_in = vec![0.0; configs.num_years];
+    let mut total_production = vec![0.0; configs.num_years];
+
+    for year in 0..configs.num_years {
+        let direct_consumption = electricity_demand
+            .iter()
+            .enumerate()
+            .map(|(i, &x)| solar_production[i].min(x))
+            .collect::<Vec<f64>>();
+        // positive if producing more than demand and negative if producing less than demand
+        let over_production = solar_production
+            .iter()
+            .enumerate()
+            .map(|(i, &x)| x - electricity_demand[i])
+            .collect::<Vec<f64>>();
+        let mut battery_status = vec![0.0; NUM_HOURS];
+        let mut battery_out = vec![0.0; NUM_HOURS];
+        let mut battery_in = vec![0.0; NUM_HOURS];
+
+        if over_production[0] > 0.0 {
+            battery_status[0] = over_production[0]
+                .max(0.0)
+                .min(bat_cap)
+                .min(configs.max_battery_charge_rate);
+            battery_in[0] = battery_status[0];
+        }
+
+        for i in 1..NUM_HOURS {
+            let current_status = battery_status[i - 1] * (1.0 - configs.battery_loss);
+            if over_production[i] < 0.0 && current_status > 0.0 {
+                battery_out[i] = current_status
+                    .min(-over_production[i])
+                    .min(configs.max_battery_discharge_rate);
+                battery_status[i] = current_status - battery_out[i];
+            } else if over_production[i] > 0.0 {
+                battery_in[i] = over_production[i]
+                    .min(bat_cap - current_status)
+                    .min(configs.max_battery_charge_rate);
+                battery_status[i] = current_status + battery_in[i];
+            } else {
+                battery_status[i] = current_status;
+            }
+        }
+
+        //reduce consumption and demand, ...
+        total_direct_consumption[year] = direct_consumption.iter().sum();
+        total_over_production[year] = over_production.iter().map(|&x| x.max(0.0)).sum::<f64>();
+        total_battery_out[year] = battery_out.iter().sum();
+        total_battery_in[year] = battery_in.iter().sum();
+        total_production[year] = solar_production.iter().sum();
+
+        bat_cap *= 1.0 - configs.battery_degradation;
+        solar_production = solar_production
+            .iter()
+            .map(|&x| x * (1.0 - configs.pv_degradation))
+            .collect::<Vec<f64>>();
+    }
+
+    // Sum up all years
+    let total_production_sum: f64 = total_production.iter().sum();
+    let total_direct_consumption_sum: f64 = total_direct_consumption.iter().sum();
+    let total_battery_out_sum: f64 = total_battery_out.iter().sum();
+    let total_battery_in_sum: f64 = total_battery_in.iter().sum();
+    let total_overproduction_without_battery: f64 = total_over_production.iter().sum();
+
+    // Calculate total demand (constant across years, so just multiply by num_years)
+    let total_demand: f64 = electricity_demand.iter().sum::<f64>() * configs.num_years as f64;
+
+    // Calculate autarky: percentage of demand met by own production (direct + from battery)
+    let autarky = (total_direct_consumption_sum + total_battery_out_sum) / total_demand;
+
+    // Calculate what overproduction would be without battery:
+    // This is the production that exceeds demand at each hour, without battery storage
+    let total_overproduction = total_overproduction_without_battery - total_battery_in_sum;
+
+    Ok(StaticSimulationResults {
+        autarky,
+        total_production: total_production_sum,
+        total_direct_consumption: total_direct_consumption_sum,
+        total_battery_out: total_battery_out_sum,
+        total_battery_in: total_battery_in_sum,
+        total_overproduction,
+        total_overproduction_without_battery,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -762,5 +946,91 @@ mod tests {
         );
         assert_eq!(results.pv_capacity_kw, 1.8513578521489689);
         assert_eq!(results.battery_capacity_kwh, 0.0);
+    }
+
+    #[test]
+    fn test_run_static_simulation_no_battery() {
+        // Test static simulation without battery storage
+
+        const YEARLY_DEMAND: f64 = 9000000.0;
+        let solar_irradiance = load_solar_radiance_from_csv();
+        let (_hot_water_demand, electricity_demand) = load_demand_from_csv();
+
+        // Scale electricity demand to match YEARLY_DEMAND
+        let current_total: f64 = electricity_demand.iter().sum();
+        let scale_factor = YEARLY_DEMAND / current_total;
+        let electricity_demand: Vec<f64> = electricity_demand
+            .iter()
+            .map(|&x| x * scale_factor)
+            .collect();
+
+        let configs = StaticSimulationConfigs {
+            max_battery_charge_rate: 5000.0,
+            max_battery_discharge_rate: 5000.0,
+            num_years: 1,
+            ..Default::default()
+        };
+
+        let pv_capacity = 6000.0;
+        let battery_capacity = 0.0;
+
+        let results = run_static_simulation(
+            pv_capacity,
+            battery_capacity,
+            solar_irradiance,
+            electricity_demand,
+            configs,
+        )
+        .unwrap();
+
+        println!("Results: {:?}", results);
+
+        assert_eq!(results.total_production, 5685185.39999999);
+        assert_eq!(results.total_direct_consumption, 2554102.674174359);
+        assert_eq!(results.total_battery_out, 0.0);
+        assert_eq!(results.total_battery_in, 0.0);
+        assert_eq!(results.total_overproduction, 3131082.7258256325);
+        assert_eq!(
+            results.total_overproduction_without_battery,
+            3131082.7258256325
+        );
+        assert_eq!(results.autarky, 0.28378918601937186);
+    }
+
+    #[test]
+    fn test_run_static_simulation_with_battery() {
+        // Test static simulation with battery storage
+        let solar_irradiance = load_solar_radiance_from_csv();
+        let (_hot_water_demand, electricity_demand) = load_demand_from_csv();
+
+        let configs = StaticSimulationConfigs {
+            num_years: 2,
+            ..Default::default()
+        };
+
+        let pv_capacity = 10000.0; // 10 kW
+        let battery_capacity = 13500.0; // 13.5 kWh
+
+        let results = run_static_simulation(
+            pv_capacity,
+            battery_capacity,
+            solar_irradiance.clone(),
+            electricity_demand.clone(),
+            configs.clone(),
+        )
+        .unwrap();
+
+        println!("Results: {:?}", results);
+
+        assert_eq!(results.total_production, 18_903_241.455000013);
+        assert_eq!(results.total_direct_consumption, 3_207_939.49475001);
+        assert_eq!(results.total_battery_out, 3_955_258.749336642);
+        assert_eq!(results.total_battery_in, 3_962_162.5767231826);
+        assert_eq!(results.total_overproduction, 11_733_139.383526823);
+        assert_eq!(
+            results.total_overproduction_without_battery,
+            15_695_301.960250005
+        );
+        assert_eq!(results.autarky, 0.8581880054056307);
     }
 }
