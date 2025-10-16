@@ -20,7 +20,7 @@ pub struct ROICalculationConfig {
     pub inv_grid: f64,
     pub inv_bat: f64,
     pub fc_grid: f64,
-    pub electricity_usage: f64,
+    pub electricity_usage_wh: f64,
     pub electricity_price_increase: f64,
 }
 
@@ -45,7 +45,7 @@ impl From<SimpleOptimizationResults> for ROICalculationInput {
                 inv_grid: results.config.inv_grid,
                 inv_bat: results.config.inv_bat,
                 fc_grid: results.config.fc_grid,
-                electricity_usage: results.config.electricity_usage,
+                electricity_usage_wh: results.config.electricity_usage,
                 electricity_price_increase: results.config.electricity_price_increase,
             },
         }
@@ -76,7 +76,7 @@ pub fn calculate_optimized_roi(
     // Calculate annual savings for each year
     let annual_costs_no_solar = (0..num_years)
         .map(|index| {
-            input.config.fc_grid * input.config.electricity_usage / 1000.0
+            input.config.fc_grid * input.config.electricity_usage_wh / 1000.0
                 * (1.0 + input.config.electricity_price_increase).powf(index as f64)
         })
         .collect::<Vec<f64>>();
@@ -223,7 +223,7 @@ mod tests {
             inv_grid: 0.0,
             inv_bat: 0.0,
             fc_grid: 0.16,
-            electricity_usage,
+            electricity_usage_wh: electricity_usage,
             electricity_price_increase: 0.01,
         };
 
@@ -245,6 +245,38 @@ mod tests {
     }
 
     #[test]
+    fn test_calculate_financial_rentability_2() {
+        let num_years = 25;
+        let electricity_usage = 5500000.0;
+        let annual_grid_energy_kwh = 3726.29;
+
+        let config = ROICalculationConfig {
+            inv_pv: 900.0,
+            inv_grid: 0.0,
+            inv_bat: 0.0,
+            fc_grid: 0.16,
+            electricity_usage_wh: electricity_usage,
+            electricity_price_increase: 0.01,
+        };
+
+        let input = ROICalculationInput {
+            pv_capacity_kw: 4.0 * 0.61,
+            grid_capacity_kw: 0.0,
+            battery_capacity_kwh: 0.0,
+            annual_grid_energy_kwh,
+            config,
+        };
+
+        let optimized_roi = calculate_optimized_roi(input, num_years, 120.0).unwrap();
+        println!("Optimized ROI: {:?}", optimized_roi);
+        assert!((optimized_roi.roi - 0.0842).abs() < 1e-3);
+        println!("Net present value: {:?}", optimized_roi.net_present_value);
+        assert!((optimized_roi.net_present_value + 95.6).abs() < 0.5);
+        println!("Payback period: {:?}", optimized_roi.payback_period);
+        assert!((optimized_roi.payback_period.unwrap() - 12.18).abs() < 0.02);
+    }
+
+    #[test]
     fn test_calculate_financial_rentability_with_yearly() {
         let num_years = 25;
         let electricity_usage = 9000000.0;
@@ -255,7 +287,7 @@ mod tests {
             inv_grid: 0.0,
             inv_bat: 0.0,
             fc_grid: 0.16,
-            electricity_usage,
+            electricity_usage_wh: electricity_usage,
             electricity_price_increase: 0.0,
         };
 
@@ -288,7 +320,7 @@ mod tests {
             inv_grid: 0.0,
             inv_bat: 0.0,
             fc_grid: 0.15,
-            electricity_usage,
+            electricity_usage_wh: electricity_usage,
             electricity_price_increase: 0.0,
         };
 
