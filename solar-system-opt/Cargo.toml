@@ -8,8 +8,6 @@ description = "LP optimization for solar system size based on consumption data"
 [dependencies]
 good_lp = { version = "1.8", features = [
     "clarabel",
-    "lp-solvers",
-    "highs",
     "scip",
     "scip_bundled",
 ], default-features = false }
